@@ -388,6 +388,7 @@ const Tooltip = ({ children, content, position = 'top' }) => {
 // ============================================
 const MiniLineChart = ({ data, color, height = 60, comparisonData = null }) => {
   if (!data || data.length === 0) return <div className="h-full flex items-center justify-center text-gray-500 text-xs">No data</div>;
+  if (data.length === 1) return <div className="h-full flex flex-col items-center justify-center text-gray-500 text-xs"><div className="mb-2">Only 1 workout</div><div className="text-[10px] text-gray-600">Need 2+ workouts to show trend</div></div>;
   const allVals = comparisonData ? [...data.map(d => d.value), ...comparisonData.map(d => d.value)] : data.map(d => d.value);
   const max = Math.max(...allVals), min = Math.min(...allVals), range = max - min || 1, pad = 10, w = 100;
   const pts = data.map((d, i) => ({ x: pad + (i / Math.max(data.length - 1, 1)) * (w - pad * 2), y: height - pad - ((d.value - min) / range) * (height - pad * 2) }));
@@ -560,12 +561,17 @@ const MeasurementsCard = ({ measurements }) => {
         <span className="text-2xl font-bold text-white">{bmi}</span>
       </div>
       <div className="mt-3 space-y-1.5">
-        {[{ label: 'Chest', cur: current.chest, start: starting.chest }, { label: 'Biceps', cur: current.biceps, start: starting.biceps }].map(m => (
-          <div key={m.label} className="flex items-center justify-between py-1 text-sm">
-            <span className="text-gray-400">{m.label}</span>
-            <div className="flex items-center gap-2"><span className="text-white">{m.cur}cm</span><span className={`text-xs ${m.cur >= m.start ? 'text-green-400' : 'text-red-400'}`}>{m.cur >= m.start ? '+' : ''}{m.cur - m.start}</span></div>
-          </div>
-        ))}
+        {[{ label: 'Chest', cur: current.chest, start: starting.chest }, { label: 'Biceps', cur: current.biceps, start: starting.biceps }].map(m => {
+          const curInches = (m.cur / 2.54).toFixed(1);
+          const startInches = (m.start / 2.54).toFixed(1);
+          const diffInches = (curInches - startInches).toFixed(1);
+          return (
+            <div key={m.label} className="flex items-center justify-between py-1 text-sm">
+              <span className="text-gray-400">{m.label}</span>
+              <div className="flex items-center gap-2"><span className="text-white">{curInches}"</span><span className={`text-xs ${m.cur >= m.start ? 'text-green-400' : 'text-red-400'}`}>{diffInches > 0 ? '+' : ''}{diffInches}</span></div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
