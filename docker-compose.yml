@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Frontend - React/Vite app
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: hit-tracker-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - hit-tracker-network
+
+  # Backend - Express API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: hit-tracker-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - HEVY_API_KEY=63d8a8e8-e4b5-408b-bf03-aa06ea80a5f1
+    volumes:
+      - hit-tracker-data:/app/data
+      - hit-tracker-uploads:/app/uploads
+    restart: unless-stopped
+    networks:
+      - hit-tracker-network
+
+networks:
+  hit-tracker-network:
+    driver: bridge
+
+volumes:
+  hit-tracker-data:
+    driver: local
+  hit-tracker-uploads:
+    driver: local
