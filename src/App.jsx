@@ -6,7 +6,7 @@ import {
   Scale, Ruler, RefreshCw, AlertCircle, CheckCircle2,
   Timer, ArrowUpRight, Minus, Plus, Filter, Search,
   Sun, Moon, Trophy, Sparkles, Brain, Battery, LineChart,
-  Gauge, MapPin, Route, Upload, Download, MoreVertical,
+  Gauge, MapPin, Upload, Download, MoreVertical,
   FileJson, FileText, X, ChevronLeft, CalendarDays,
   Layers, Play, Pause, Wind, Info, Star, Crown, Medal,
   Zap as Lightning, Target as TargetIcon, TrendingUp as TrendUp,
@@ -420,7 +420,7 @@ const SetTypeBadge = ({ type }) => {
 };
 
 const ConditioningIcon = ({ type, size = 16, className = '' }) => {
-  const icons = { walking: Footprints, swimming: Waves, running: Route, cycling: Bike, hiit: Zap, other: Activity };
+  const icons = { walking: Footprints, swimming: Waves, running: Wind, cycling: Bike, hiit: Zap, other: Activity };
   const Icon = icons[type] || icons.other;
   return <Icon size={size} className={className} />;
 };
