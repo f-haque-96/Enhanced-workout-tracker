@@ -8,7 +8,16 @@
       "Bash(else echo \"No .git directory - starting fresh\")",
       "Bash(fi)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(curl:*)",
+      "WebSearch",
+      "WebFetch(domain:api.hevyapp.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

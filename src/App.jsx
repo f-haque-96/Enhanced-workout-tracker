@@ -378,7 +378,7 @@ const Tooltip = ({ children, content, position = 'top' }) => {
   return (
     <div className="relative inline-block" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
       {children}
-      {show && <div className={`absolute z-50 ${pos[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs`}>{content}</div>}
+      {show && <div className={`absolute z-[9999] ${pos[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs pointer-events-none`}>{content}</div>}
     </div>
   );
 };
@@ -430,10 +430,10 @@ const MoreMenu = ({ onUploadHevy, onUploadAppleHealth, onExportJson, onExportCsv
   const ref = useRef(null);
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative z-[9999]" ref={ref}>
       <button onClick={() => setIsOpen(!isOpen)} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10"><MoreVertical size={18} className="text-gray-400" /></button>
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-slate-900 border border-white/10 shadow-xl z-50">
+        <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-slate-900 border border-white/10 shadow-xl z-[9999]">
           <div className="p-2 border-b border-white/10">
             <p className="text-xs text-gray-500 px-2 py-1">Upload</p>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy (JSON)</span><input type="file" accept=".json" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
@@ -1363,12 +1363,16 @@ const App = () => {
           </p>
         </div>
         
-        {/* Top Row - 4 Cards */}
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+        {/* Achievement Panel - Full Width Row */}
+        <section>
+          <AchievementPanel workouts={data.workouts} conditioning={data.conditioning} bodyweight={data.measurements.current.weight} />
+        </section>
+
+        {/* Main Stats Row - 3 Cards */}
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
           <KeyLiftsCard workouts={data.workouts} bodyweight={data.measurements.current.weight} />
           <MeasurementsCard measurements={data.measurements} />
           <WeeklyInsightsCard workouts={data.workouts} conditioning={data.conditioning} appleHealth={data.appleHealth} />
-          <AchievementPanel workouts={data.workouts} conditioning={data.conditioning} bodyweight={data.measurements.current.weight} />
         </section>
         
         {/* Analytics + Logs */}
