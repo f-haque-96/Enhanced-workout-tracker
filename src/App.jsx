@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { 
-  TrendingUp, TrendingDown, Dumbbell, Heart, Footprints, 
+import {
+  TrendingUp, TrendingDown, Dumbbell, Heart, Footprints,
   Flame, Clock, Calendar, ChevronDown, ChevronRight,
   Activity, Target, Zap, Award, BarChart3, PieChart,
   Scale, Ruler, RefreshCw, AlertCircle, CheckCircle2,
@@ -11,7 +11,7 @@ import {
   FileJson, FileText, X, ChevronLeft, CalendarDays,
   Layers, Play, Pause, Wind, Info, Star, Crown, Medal,
   Zap as Lightning, Target as TargetIcon, TrendingUp as TrendUp,
-  AlertTriangle, CheckCircle, Circle, Flame as Fire, Waves, Bike
+  AlertTriangle, CheckCircle, Circle, Flame as Fire, Waves, Bike, Trash2
 } from 'lucide-react';
 
 // ============================================
@@ -134,6 +134,20 @@ const normalizeApiData = (raw) => {
     lastSync: raw.lastSync,
     lastWebhook: raw.lastWebhook,
   };
+};
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+// Helper to clean up Apple Health workout type names
+const cleanWorkoutType = (type) => {
+  if (!type) return 'Other';
+  // Remove "HKWorkoutActivityType" prefix
+  return type
+    .replace('HKWorkoutActivityType', '')
+    .replace(/([A-Z])/g, ' $1')  // Add space before capitals
+    .trim();
 };
 
 // ============================================
@@ -598,7 +612,7 @@ const ConditioningIcon = ({ type, size = 16, className = '' }) => {
   return <Icon size={size} className={className} />;
 };
 
-const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth, onUploadAppleHealthCSV, onExportJson, onExportCsv }) => {
+const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth, onUploadAppleHealthCSV, onExportJson, onExportCsv, onReset }) => {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
@@ -614,10 +628,14 @@ const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth,
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-pink-400" /><span className="text-sm text-white">Apple Health (XML)</span><input type="file" accept=".xml,.zip" onChange={(e) => { onUploadAppleHealth(e); setIsOpen(false); }} className="hidden" /></label>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-rose-400" /><span className="text-sm text-white">Apple Health (CSV)</span><input type="file" accept=".csv" onChange={(e) => { onUploadAppleHealthCSV(e); setIsOpen(false); }} className="hidden" /></label>
           </div>
-          <div className="p-2">
+          <div className="p-2 border-b border-white/10">
             <p className="text-xs text-gray-500 px-2 py-1">Export</p>
             <button onClick={() => { onExportJson(); setIsOpen(false); }} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 w-full"><FileJson size={16} className="text-amber-400" /><span className="text-sm text-white">JSON</span></button>
             <button onClick={() => { onExportCsv(); setIsOpen(false); }} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 w-full"><FileText size={16} className="text-green-400" /><span className="text-sm text-white">CSV</span></button>
+          </div>
+          <div className="p-2">
+            <p className="text-xs text-gray-500 px-2 py-1">Actions</p>
+            <button onClick={() => { onReset(); setIsOpen(false); }} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-red-500/10 w-full"><Trash2 size={16} className="text-red-400" /><span className="text-sm text-red-400">Reset All Data</span></button>
           </div>
         </div>
       )}
@@ -708,91 +726,76 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
 // MEASUREMENTS CARD
 // ============================================
 const MeasurementsCard = ({ measurements }) => {
-  const { current, starting, height } = measurements;
+  const current = measurements?.current || {};
+  const starting = measurements?.starting || {};
 
-  // Calculate BMI if we have weight (use default height of 175cm if not provided)
-  const effectiveHeight = height || 175; // Default to 175cm (~5'9") if not specified
-  const bmi = current.weight ? (current.weight / Math.pow(effectiveHeight / 100, 2)).toFixed(1) : null;
-  const bmiCategory = bmi ? (bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal' : bmi < 30 ? 'Overweight' : 'Obese') : null;
-  const bmiColor = bmi ? (bmi < 18.5 ? 'yellow' : bmi < 25 ? 'green' : bmi < 30 ? 'orange' : 'red') : 'gray';
+  const weight = current.weight || 0;
+  const bodyFat = current.bodyFat || 0;
+  const waist = current.waist || 0;
+  const height = 1.75; // Your height in meters (adjust if needed)
+  const bmi = weight > 0 ? (weight / (height * height)).toFixed(1) : null;
 
-  // Calculate changes
-  const weightChange = (current.weight && starting.weight) ? ((current.weight - starting.weight) / starting.weight * 100).toFixed(1) : null;
-  const bodyFatChange = (current.bodyFat && starting.bodyFat) ? (starting.bodyFat - current.bodyFat).toFixed(1) : null;
+  const getBmiCategory = (bmi) => {
+    if (!bmi) return { label: 'No data', color: 'text-slate-400' };
+    if (bmi < 18.5) return { label: 'Underweight', color: 'text-blue-400' };
+    if (bmi < 25) return { label: 'Normal', color: 'text-green-400' };
+    if (bmi < 30) return { label: 'Overweight', color: 'text-yellow-400' };
+    return { label: 'Obese', color: 'text-red-400' };
+  };
 
-  const hasData = current.weight || current.bodyFat || current.chest || current.biceps;
+  const bmiInfo = getBmiCategory(parseFloat(bmi));
+
+  const calcChange = (current, starting) => {
+    if (!current || !starting || starting === 0) return null;
+    return (((current - starting) / starting) * 100).toFixed(1);
+  };
 
   return (
     <div className="card h-full">
-      <div className="flex items-center gap-2 mb-4"><Scale className="text-blue-400" size={20} /><h3 className="text-lg font-semibold text-white">Body Composition</h3></div>
-
-      {!hasData ? (
-        <div className="flex flex-col items-center justify-center py-8 text-center">
-          <Upload className="text-gray-600 mb-3" size={32} />
-          <p className="text-gray-400 text-sm mb-1">No measurement data</p>
-          <p className="text-gray-500 text-xs">Upload Hevy Measurements (CSV) or Apple Health (XML) to see your body composition</p>
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <Tooltip content={current.weight && starting.weight ? <div><p className="font-medium">Weight</p><p className="text-gray-400">Started: {starting.weight}kg → Now: {current.weight}kg</p></div> : 'No weight data'}>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-500/5 border border-blue-500/20 cursor-help">
-                <p className="text-xs text-gray-400 mb-1">Weight</p>
-                {current.weight ? (
-                  <>
-                    <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-white">{current.weight}</span><span className="text-sm text-gray-400">kg</span></div>
-                    {weightChange && <p className="text-xs mt-1"><span className={weightChange >= 0 ? 'text-green-400' : 'text-red-400'}>{weightChange > 0 ? '+' : ''}{weightChange}%</span></p>}
-                  </>
-                ) : (
-                  <p className="text-sm text-gray-500">No data</p>
-                )}
+      <div className="flex items-center gap-2 mb-4">
+        <Scale className="text-blue-400" size={20} />
+        <h3 className="text-lg font-semibold text-white">Body Composition</h3>
+      </div>
+      <div className="space-y-4">
+        {/* Weight & Body Fat */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl p-4 border border-blue-500/20">
+            <div className="text-xs text-blue-300 mb-1">Weight</div>
+            <div className="text-2xl font-bold">{weight}<span className="text-sm text-slate-400 ml-1">kg</span></div>
+            {calcChange(weight, starting.weight) && (
+              <div className={`text-xs mt-1 ${parseFloat(calcChange(weight, starting.weight)) > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {calcChange(weight, starting.weight) > 0 ? '+' : ''}{calcChange(weight, starting.weight)}%
               </div>
-            </Tooltip>
-            <Tooltip content={current.bodyFat && starting.bodyFat ? <div><p className="font-medium">Body Fat</p><p className="text-gray-400">Started: {starting.bodyFat}% → Now: {current.bodyFat}%</p></div> : 'No body fat data'}>
-              <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-500/5 border border-purple-500/20 cursor-help">
-                <p className="text-xs text-gray-400 mb-1">Body Fat</p>
-                {current.bodyFat ? (
-                  <>
-                    <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-white">{current.bodyFat}</span><span className="text-sm text-gray-400">%</span></div>
-                    {bodyFatChange && <p className="text-xs mt-1"><span className="text-green-400">-{bodyFatChange}%</span></p>}
-                  </>
-                ) : (
-                  <p className="text-sm text-gray-500">No data</p>
-                )}
-              </div>
-            </Tooltip>
-          </div>
-          <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-400">BMI</span>
-              {bmiCategory && <span className={`text-xs px-2 py-0.5 rounded-full bg-${bmiColor}-500/20 text-${bmiColor}-400`}>{bmiCategory}</span>}
-            </div>
-            {bmi ? (
-              <span className="text-2xl font-bold text-white">{bmi}</span>
-            ) : (
-              <p className="text-sm text-gray-500">No data</p>
             )}
           </div>
-          <div className="mt-3 space-y-1.5">
-            {[{ label: 'Chest', cur: current.chest, start: starting.chest }, { label: 'Biceps', cur: current.biceps, start: starting.biceps }].map(m => {
-              if (!m.cur) return null;
-              // Values are already in inches from Hevy CSV - no conversion needed
-              const curInches = m.cur.toFixed(1);
-              const startInches = m.start ? m.start.toFixed(1) : null;
-              const diffInches = startInches ? (m.cur - m.start).toFixed(1) : null;
-              return (
-                <div key={m.label} className="flex items-center justify-between py-1 text-sm">
-                  <span className="text-gray-400">{m.label}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-white">{curInches}"</span>
-                    {diffInches && <span className={`text-xs ${m.cur >= m.start ? 'text-green-400' : 'text-red-400'}`}>{diffInches > 0 ? '+' : ''}{diffInches}</span>}
-                  </div>
-                </div>
-              );
-            })}
+          <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-4 border border-purple-500/20">
+            <div className="text-xs text-purple-300 mb-1">Body Fat</div>
+            <div className="text-2xl font-bold">{bodyFat}<span className="text-sm text-slate-400 ml-1">%</span></div>
+            {calcChange(bodyFat, starting.bodyFat) && (
+              <div className={`text-xs mt-1 ${parseFloat(calcChange(bodyFat, starting.bodyFat)) < 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {calcChange(bodyFat, starting.bodyFat) > 0 ? '+' : ''}{calcChange(bodyFat, starting.bodyFat)}%
+              </div>
+            )}
           </div>
-        </>
-      )}
+        </div>
+
+        {/* BMI */}
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="flex justify-between items-center">
+            <div className="text-sm text-slate-400">BMI</div>
+            <div className={`text-sm ${bmiInfo.color}`}>{bmiInfo.label}</div>
+          </div>
+          <div className="text-2xl font-bold mt-1">{bmi || 'No data'}</div>
+        </div>
+
+        {/* Waist */}
+        {waist > 0 && (
+          <div className="flex justify-between items-center py-2 border-t border-slate-700/50">
+            <span className="text-slate-400">Waist</span>
+            <span className="font-semibold">{waist}"</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -1212,7 +1215,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                     <div key={s.id} className="flex items-center justify-between p-2 rounded-lg bg-black/20">
                       <div className="flex items-center gap-2">
                         <ConditioningIcon type={s.category} size={14} style={{ color: color.text }} />
-                        <div><p className="text-xs text-white">{s.type}</p><p className="text-[10px] text-gray-500">{formatDateShort(s.date)}</p></div>
+                        <div><p className="text-xs text-white">{cleanWorkoutType(s.type)}</p><p className="text-[10px] text-gray-500">{formatDateShort(s.date)}</p></div>
                       </div>
                       <div className="text-right">
                         <p className="text-xs text-white">{formatDuration(s.duration)}</p>
@@ -1282,7 +1285,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                       <ConditioningIcon type={s.category} size={20} style={{ color: color.text }} />
                     </div>
                     <div>
-                      <p className="text-white font-medium">{s.type}</p>
+                      <p className="text-white font-medium">{cleanWorkoutType(s.type)}</p>
                       <p className="text-xs text-gray-400">{formatDate(s.date)} • <span className="text-pink-400">Apple Health</span></p>
                     </div>
                   </div>
@@ -1585,6 +1588,22 @@ const App = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleReset = async () => {
+    if (!confirm('Are you sure? This will delete ALL workout and measurement data!')) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/reset`, { method: 'POST' });
+      if (res.ok) {
+        alert('All data cleared! Refresh the page.');
+        window.location.reload();
+      } else {
+        alert('Failed to reset data');
+      }
+    } catch (error) {
+      console.error('Reset error:', error);
+      alert('Failed to reset data');
+    }
+  };
+
   if (loading && !data) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -1630,7 +1649,7 @@ const App = () => {
               <button onClick={handleRefresh} disabled={loading} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50">
                 <RefreshCw size={18} className={`text-gray-400 ${loading ? 'animate-spin' : ''}`} />
               </button>
-              <MoreMenu onUploadHevy={handleUploadHevy} onUploadHevyMeasurements={handleUploadHevyMeasurements} onUploadAppleHealth={handleUploadAppleHealth} onUploadAppleHealthCSV={handleUploadAppleHealthCSV} onExportJson={handleExportJson} onExportCsv={handleExportCsv} />
+              <MoreMenu onUploadHevy={handleUploadHevy} onUploadHevyMeasurements={handleUploadHevyMeasurements} onUploadAppleHealth={handleUploadAppleHealth} onUploadAppleHealthCSV={handleUploadAppleHealthCSV} onExportJson={handleExportJson} onExportCsv={handleExportCsv} onReset={handleReset} />
             </div>
           </div>
         </div>

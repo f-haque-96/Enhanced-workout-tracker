@@ -149,11 +149,11 @@ function parseWorkoutXML(xml) {
     if (!typeMatch || !startMatch) return null;
 
     const workoutType = typeMatch[1];
-    
+
     // Determine category
     let category = 'other';
     let displayType = 'Other';
-    
+
     if (workoutType.includes('TraditionalStrengthTraining') || workoutType.includes('FunctionalStrengthTraining')) {
       category = 'strength';
       displayType = 'Strength Training';
@@ -183,9 +183,45 @@ function parseWorkoutXML(xml) {
       displayType = 'Rowing';
     }
 
-    // Extract heart rate from metadata if available
-    const avgHRMatch = xml.match(/HKAverageHeartRate[^>]*value="([^"]+)"/);
-    const maxHRMatch = xml.match(/HKMaximumHeartRate[^>]*value="([^"]+)"/);
+    // Extract calories - try main attribute first, then WorkoutStatistics
+    let calories = caloriesMatch ? parseFloat(caloriesMatch[1]) : 0;
+    if (calories === 0) {
+      const statsCaloriesMatch = xml.match(/HKQuantityTypeIdentifierActiveEnergyBurned[^>]*sum="([^"]+)"/);
+      if (statsCaloriesMatch) {
+        calories = parseFloat(statsCaloriesMatch[1]);
+      }
+    }
+
+    // Extract heart rate - try multiple sources
+    let avgHeartRate = null;
+    let maxHeartRate = null;
+
+    // Try HeartRateStatistics element
+    const hrStatsAvgMatch = xml.match(/HeartRateStatistics[^>]*average="([^"]+)"/);
+    const hrStatsMaxMatch = xml.match(/HeartRateStatistics[^>]*maximum="([^"]+)"/);
+
+    if (hrStatsAvgMatch) avgHeartRate = parseInt(hrStatsAvgMatch[1]);
+    if (hrStatsMaxMatch) maxHeartRate = parseInt(hrStatsMaxMatch[1]);
+
+    // Try WorkoutStatistics for heart rate
+    if (!avgHeartRate) {
+      const statsAvgHRMatch = xml.match(/HKQuantityTypeIdentifierHeartRate[^>]*average="([^"]+)"/);
+      if (statsAvgHRMatch) avgHeartRate = parseInt(statsAvgHRMatch[1]);
+    }
+    if (!maxHeartRate) {
+      const statsMaxHRMatch = xml.match(/HKQuantityTypeIdentifierHeartRate[^>]*maximum="([^"]+)"/);
+      if (statsMaxHRMatch) maxHeartRate = parseInt(statsMaxHRMatch[1]);
+    }
+
+    // Try metadata as fallback
+    if (!avgHeartRate) {
+      const metaAvgHRMatch = xml.match(/HKAverageHeartRate[^>]*value="([^"]+)"/);
+      if (metaAvgHRMatch) avgHeartRate = parseInt(metaAvgHRMatch[1]);
+    }
+    if (!maxHeartRate) {
+      const metaMaxHRMatch = xml.match(/HKMaximumHeartRate[^>]*value="([^"]+)"/);
+      if (metaMaxHRMatch) maxHeartRate = parseInt(metaMaxHRMatch[1]);
+    }
 
     return {
       type: workoutType,
@@ -194,10 +230,10 @@ function parseWorkoutXML(xml) {
       startDate: startMatch[1],
       endDate: endMatch ? endMatch[1] : null,
       duration: durationMatch ? parseFloat(durationMatch[1]) * 60 : 0, // Convert to seconds
-      calories: caloriesMatch ? parseFloat(caloriesMatch[1]) : 0,
+      calories,
       distance: distanceMatch ? parseFloat(distanceMatch[1]) : 0, // in meters
-      avgHeartRate: avgHRMatch ? parseInt(avgHRMatch[1]) : null,
-      maxHeartRate: maxHRMatch ? parseInt(maxHRMatch[1]) : null
+      avgHeartRate,
+      maxHeartRate
     };
   } catch (e) {
     console.error('Error parsing workout:', e.message);

@@ -156,6 +156,25 @@ app.get('/api/data', (req, res) => {
   res.json(data);
 });
 
+// Reset all data
+app.post('/api/reset', (req, res) => {
+  const freshData = {
+    workouts: [],
+    conditioning: [],
+    measurements: { current: {}, starting: {}, history: [] },
+    appleHealth: {},
+    lastSync: null,
+    lastWebhook: null
+  };
+
+  if (writeData(freshData)) {
+    console.log('✨ All data reset!');
+    res.json({ success: true, message: 'All data cleared' });
+  } else {
+    res.status(500).json({ error: 'Failed to reset data' });
+  }
+});
+
 // Update measurements
 app.post('/api/measurements', (req, res) => {
   const data = readData();
