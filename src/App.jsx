@@ -437,7 +437,7 @@ const MoreMenu = ({ onUploadHevy, onUploadAppleHealth, onExportJson, onExportCsv
         <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-slate-900 border border-white/10 shadow-xl z-[9999]">
           <div className="p-2 border-b border-white/10">
             <p className="text-xs text-gray-500 px-2 py-1">Upload</p>
-            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy (CSV)</span><input type="file" accept=".csv" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
+            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy (JSON)</span><input type="file" accept=".json" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-pink-400" /><span className="text-sm text-white">Apple Health (XML)</span><input type="file" accept=".xml,.zip" onChange={(e) => { onUploadAppleHealth(e); setIsOpen(false); }} className="hidden" /></label>
           </div>
           <div className="p-2">

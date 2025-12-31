@@ -299,30 +299,47 @@ app.get('/api/hevy/workouts/:id', async (req, res) => {
   }
 });
 
-// Upload Hevy JSON export
+// Upload Hevy export (JSON or CSV)
 app.post('/api/hevy/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
-    
+
     const fileContent = fs.readFileSync(req.file.path, 'utf8');
-    const hevyData = JSON.parse(fileContent);
-    
-    const workouts = (hevyData.workouts || []).map(transformWorkout);
-    
-    const data = readData();
-    data.workouts = workouts;
-    data.lastSync = new Date().toISOString();
-    
-    fs.unlinkSync(req.file.path);
-    
-    if (writeData(data)) {
-      res.json({ success: true, workoutsCount: workouts.length });
+    const fileName = req.file.originalname || '';
+    let parsedData;
+
+    // Detect file type and parse accordingly
+    if (fileName.toLowerCase().endsWith('.json')) {
+      // Parse JSON
+      parsedData = JSON.parse(fileContent);
+      const workouts = (parsedData.workouts || []).map(transformWorkout);
+
+      const data = readData();
+      data.workouts = workouts;
+      data.lastSync = new Date().toISOString();
+
+      fs.unlinkSync(req.file.path);
+
+      if (writeData(data)) {
+        return res.json({ success: true, workoutsCount: workouts.length });
+      } else {
+        return res.status(500).json({ error: 'Failed to save data' });
+      }
+    } else if (fileName.toLowerCase().endsWith('.csv')) {
+      // For now, CSV uploads are not supported for workouts
+      // Hevy workout CSV format is complex and requires proper parsing
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({
+        error: 'CSV upload not yet supported. Please use Hevy API sync (automatic) or export as JSON instead.',
+        suggestion: 'The dashboard automatically syncs workouts from Hevy API every 15 minutes. You can also manually trigger sync or use JSON export.'
+      });
     } else {
-      res.status(500).json({ error: 'Failed to save data' });
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Unsupported file format. Please upload JSON file.' });
     }
-    
+
   } catch (error) {
     console.error('Hevy upload error:', error);
     if (req.file) fs.unlinkSync(req.file.path);
