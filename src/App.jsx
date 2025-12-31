@@ -837,10 +837,12 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
       
       wk.forEach(w => {
         let wVol = 0;
+        let hasExercisesInCategory = false;
         if (w.appleHealth) { cal += w.appleHealth.activeCalories; dur += w.appleHealth.duration; hrSum += w.appleHealth.avgHeartRate; hrC++; }
         w.exercises.forEach(ex => {
           const { category, muscle } = categorizeExercise(ex.title);
           if (category !== activeTab) return;
+          hasExercisesInCategory = true;
           if (!exercises[ex.title]) exercises[ex.title] = { sets: 0, reps: 0, vol: 0, max: 0, warm: 0, work: 0, fail: 0, hist: [] };
           ex.sets.forEach(s => {
             if (s.set_type === 'warmup') { warm++; exercises[ex.title].warm++; return; }
@@ -854,7 +856,10 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
           const best = ex.sets.filter(s => s.set_type !== 'warmup').reduce((b, s) => { const rm = calculate1RM(s.weight_kg, s.reps); return rm > (b?.oneRM || 0) ? { ...s, oneRM: rm } : b; }, null);
           if (best) exercises[ex.title].hist.push({ date: w.start_time, weight: best.weight_kg, reps: best.reps, oneRM: best.oneRM });
         });
-        if (wVol > 0) volData.push({ date: formatDateShort(w.start_time), value: wVol });
+        // Add to volume data if workout has exercises in this category (even if volume is 0 due to warmup-only or bodyweight)
+        if (hasExercisesInCategory) {
+          volData.push({ date: formatDateShort(w.start_time), value: wVol });
+        }
       });
       
       const sorted = Object.entries(exercises).sort((a, b) => b[1].vol - a[1].vol).slice(0, 8);
