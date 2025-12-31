@@ -385,11 +385,6 @@ function processAppleHealthData(parsedData) {
         hrZones: { zone1: 20, zone2: 30, zone3: 30, zone4: 15, zone5: 5 }
       };
 
-      // Debug log for sessions with missing HR/calories
-      if (!workout.avgHeartRate || !workout.calories) {
-        console.log(`📊 Conditioning session created: ${workout.type} on ${workout.startDate.split('T')[0]} - HR: ${workout.avgHeartRate || 'MISSING'}, Calories: ${workout.calories || 'MISSING'}`);
-      }
-
       conditioningSessions.push(session);
     }
   });

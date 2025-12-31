@@ -56,7 +56,7 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
         workoutBuffer = line;
       } else if (insideWorkout) {
         workoutBuffer += line;
-        if (line.includes('</Workout>') || (line.includes('/>') && !workoutBuffer.includes('</Workout'))) {
+        if (line.includes('</Workout>')) {
           // Parse completed workout
           const workout = parseWorkoutXML(workoutBuffer);
           if (workout) {
@@ -223,7 +223,9 @@ function parseWorkoutXML(xml) {
     // Pattern 2: WorkoutStatistics with average/maximum attributes
     if (!avgHeartRate) {
       const statsAvgHRMatch = xml.match(/HKQuantityTypeIdentifierHeartRate[^>]*average="([^"]+)"/);
-      if (statsAvgHRMatch) avgHeartRate = Math.round(parseFloat(statsAvgHRMatch[1]));
+      if (statsAvgHRMatch) {
+        avgHeartRate = Math.round(parseFloat(statsAvgHRMatch[1]));
+      }
     }
     if (!maxHeartRate) {
       const statsMaxHRMatch = xml.match(/HKQuantityTypeIdentifierHeartRate[^>]*maximum="([^"]+)"/);
@@ -250,9 +252,25 @@ function parseWorkoutXML(xml) {
       if (eventMaxMatch) maxHeartRate = Math.round(parseFloat(eventMaxMatch[1]));
     }
 
-    // Debug logging for conditioning workouts with missing data
-    if (category !== 'strength' && category !== 'other' && (!avgHeartRate || !calories)) {
-      console.log(`⚠️  ${displayType} on ${startMatch[1].split('T')[0]}: HR=${avgHeartRate || 'missing'}, Cal=${calories || 'missing'}`);
+    // Extract distance from WorkoutStatistics if not in main attributes
+    let distance = distanceMatch ? parseFloat(distanceMatch[1]) : 0;
+    if (distance === 0) {
+      // Try DistanceWalkingRunning from WorkoutStatistics
+      const distStatsMatch = xml.match(/HKQuantityTypeIdentifierDistanceWalkingRunning[^>]*sum="([^"]+)"/);
+      if (distStatsMatch) {
+        const distValue = parseFloat(distStatsMatch[1]);
+        const unitMatch = xml.match(/HKQuantityTypeIdentifierDistanceWalkingRunning[^>]*unit="([^"]+)"/);
+        const unit = unitMatch ? unitMatch[1] : 'mi';
+
+        // Convert to meters
+        if (unit === 'mi') {
+          distance = distValue * 1609.34; // miles to meters
+        } else if (unit === 'km') {
+          distance = distValue * 1000; // km to meters
+        } else {
+          distance = distValue; // assume already in meters
+        }
+      }
     }
 
     return {
@@ -263,7 +281,7 @@ function parseWorkoutXML(xml) {
       endDate: endMatch ? endMatch[1] : null,
       duration: durationMatch ? parseFloat(durationMatch[1]) * 60 : 0, // Convert to seconds
       calories,
-      distance: distanceMatch ? parseFloat(distanceMatch[1]) : 0, // in meters
+      distance,
       avgHeartRate,
       maxHeartRate
     };
