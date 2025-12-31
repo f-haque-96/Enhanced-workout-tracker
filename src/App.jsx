@@ -525,7 +525,7 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
         })}
       </div>
       <div className="mt-3 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-        <p className="text-xs text-amber-400 flex items-center gap-2"><Sparkles size={12} /><span>BW: {bodyweight}kg • Total 1RM: {Object.values(keyLifts).reduce((s, l) => s + (l?.oneRM || 0), 0)}kg</span></p>
+        <p className="text-xs text-amber-400 flex items-center gap-2"><Sparkles size={12} /><span>BW: {bodyweight}kg • Total 1RM: {Object.values(keyLifts).reduce((s, l) => s + (l?.oneRM || 0), 0).toFixed(1)}kg</span></p>
       </div>
     </div>
   );
@@ -862,8 +862,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
         }
       });
       
-      // Filter out warmup-only exercises (test data) before sorting
-      const sorted = Object.entries(exercises).filter(([name, data]) => data.sets > 0).sort((a, b) => b[1].vol - a[1].vol).slice(0, 8);
+      const sorted = Object.entries(exercises).sort((a, b) => b[1].vol - a[1].vol).slice(0, 8);
       const forecasts = sorted.slice(0, 3).map(([n, d]) => {
         const h = d.hist.sort((a, b) => new Date(a.date) - new Date(b.date));
         const cur = h.length > 0 ? h[h.length - 1].oneRM : 0;
@@ -1124,16 +1123,10 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
             {filteredWorkouts.map(w => {
               const expanded = expandedWorkouts[w.id];
               const dur = (new Date(w.end_time) - new Date(w.start_time)) / 1000;
-              // Filter exercises by category and exclude warmup-only exercises (test data from Hevy)
+              // Filter exercises by category only
               const catEx = w.exercises.filter(e => {
                 const { category } = categorizeExercise(e.title);
-                if (category !== activeTab) return false;
-                // For strength workouts, exclude exercises with 0 working/failure sets (warmup-only)
-                if (activeTab !== 'conditioning') {
-                  const workingSets = e.sets.filter(s => s.set_type !== 'warmup').length;
-                  if (workingSets === 0) return false;
-                }
-                return true;
+                return category === activeTab;
               });
 
               const stats = catEx.reduce((a, e) => { e.sets.forEach(s => { if (s.set_type === 'warmup') a.warm++; else if (s.set_type === 'failure') a.fail++; else a.work++; }); return a; }, { warm: 0, work: 0, fail: 0 });
