@@ -18,13 +18,13 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'hit-tracker-webhook-secret
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: '250mb' }));
+app.use(express.urlencoded({ extended: true, limit: '250mb' }));
 
 // File upload config
-const upload = multer({ 
+const upload = multer({
   dest: 'uploads/',
-  limits: { fileSize: 100 * 1024 * 1024 } // 100MB limit for Apple Health exports
+  limits: { fileSize: 250 * 1024 * 1024 } // 250MB limit for large Apple Health exports
 });
 
 // Data storage (in production, use a database)
