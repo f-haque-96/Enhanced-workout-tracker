@@ -593,6 +593,21 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       // Handle CSV with quoted values
       const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
 
+      // DEBUG: Log first data row to check parsing
+      if (i === 1) {
+        console.log('First data row split into', values.length, 'values');
+        console.log('Sample values:', {
+          0: values[0],
+          1: values[1],
+          2: values[2],
+          3: values[3],
+          4: values[4],
+          5: values[5],
+          6: values[6],
+          7: values[7]
+        });
+      }
+
       const row = { date: null };
 
       // Parse date
@@ -624,6 +639,16 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       row.rightBicep = parseNum(colIdx.rightBicep);
       row.leftForearm = parseNum(colIdx.leftForearm);
       row.rightForearm = parseNum(colIdx.rightForearm);
+
+      // DEBUG: Log first row parsing to check column mapping
+      if (i === 1) {
+        console.log('Parsed first row:', {
+          'shoulders (idx ' + colIdx.shoulders + ')': row.shoulders,
+          'chest (idx ' + colIdx.chest + ')': row.chest,
+          'leftBicep (idx ' + colIdx.leftBicep + ')': row.leftBicep,
+          'rightBicep (idx ' + colIdx.rightBicep + ')': row.rightBicep
+        });
+      }
       row.abdomen = parseNum(colIdx.abdomen);
       row.waist = parseNum(colIdx.waist);
       row.hips = parseNum(colIdx.hips);
