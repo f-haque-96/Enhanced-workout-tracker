@@ -20,13 +20,15 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
       bodyFatRecords: [],
       restingHRRecords: [],
       leanMassRecords: [],
+      dietaryCalorieRecords: [],
       stats: {
         linesProcessed: 0,
         workoutsFound: 0,
         weightRecordsFound: 0,
         bodyFatRecordsFound: 0,
         restingHRRecordsFound: 0,
-        leanMassRecordsFound: 0
+        leanMassRecordsFound: 0,
+        dietaryCaloriesFound: 0
       }
     };
 
@@ -111,6 +113,17 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
           results.stats.leanMassRecordsFound++;
         }
       }
+
+      // ==========================================
+      // DIETARY ENERGY CONSUMED (single line)
+      // ==========================================
+      if (line.includes('HKQuantityTypeIdentifierDietaryEnergyConsumed') && line.includes('value=')) {
+        const record = parseHealthRecord(line, 'dietaryCalories');
+        if (record) {
+          results.dietaryCalorieRecords.push(record);
+          results.stats.dietaryCaloriesFound++;
+        }
+      }
     });
 
     rl.on('close', () => {
@@ -120,6 +133,7 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
       results.bodyFatRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
       results.restingHRRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
       results.leanMassRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+      results.dietaryCalorieRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
 
       resolve(results);
     });
@@ -328,7 +342,9 @@ function processAppleHealthData(parsedData, existingData) {
     conditioningSessions: [],
     latestWeight: null,
     latestBodyFat: null,
-    avgRestingHR: null
+    avgRestingHR: null,
+    dailyCalorieIntake: {},
+    weightHistory: []
   };
 
   // Process workouts
@@ -379,6 +395,26 @@ function processAppleHealthData(parsedData, existingData) {
     const recentHR = parsedData.restingHRRecords.slice(0, 30);
     const sum = recentHR.reduce((acc, r) => acc + r.value, 0);
     result.avgRestingHR = Math.round(sum / recentHR.length);
+  }
+
+  // Process dietary calorie intake (aggregate by day)
+  if (parsedData.dietaryCalorieRecords && parsedData.dietaryCalorieRecords.length > 0) {
+    parsedData.dietaryCalorieRecords.forEach(record => {
+      const dateKey = record.date.split('T')[0].split(' ')[0];
+      if (!result.dailyCalorieIntake[dateKey]) {
+        result.dailyCalorieIntake[dateKey] = 0;
+      }
+      result.dailyCalorieIntake[dateKey] += record.value;
+    });
+  }
+
+  // Process weight history (last 90 days for trend graph)
+  if (parsedData.weightRecords && parsedData.weightRecords.length > 0) {
+    const last90Days = parsedData.weightRecords.slice(0, 90);
+    result.weightHistory = last90Days.map(record => ({
+      date: record.date.split('T')[0].split(' ')[0],
+      weight: record.value
+    }));
   }
 
   return result;

@@ -398,11 +398,47 @@ function processAppleHealthData(parsedData) {
     const sum = parsedData.restingHRRecords.reduce((acc, record) => acc + record.value, 0);
     avgRestingHR = Math.round(sum / parsedData.restingHRRecords.length);
   }
-  
+
+  // Process dietary calorie intake (aggregate by day)
+  const dailyCalorieIntake = {};
+  if (parsedData.dietaryCalorieRecords && parsedData.dietaryCalorieRecords.length > 0) {
+    parsedData.dietaryCalorieRecords.forEach(record => {
+      const dateKey = record.date.split('T')[0].split(' ')[0];
+      if (!dailyCalorieIntake[dateKey]) {
+        dailyCalorieIntake[dateKey] = 0;
+      }
+      dailyCalorieIntake[dateKey] += record.value;
+    });
+  }
+
+  // Process weight history (last 90 days for trend graph)
+  const weightHistory = [];
+  if (parsedData.weightRecords && parsedData.weightRecords.length > 0) {
+    const last90Days = parsedData.weightRecords.slice(0, 90);
+    weightHistory.push(...last90Days.map(record => ({
+      date: record.date.split('T')[0].split(' ')[0],
+      weight: record.value,
+      bodyFat: null // Will be filled if bodyFat exists for same date
+    })));
+  }
+
+  // Add body fat to weight history where available
+  if (parsedData.bodyFatRecords && parsedData.bodyFatRecords.length > 0) {
+    parsedData.bodyFatRecords.forEach(bfRecord => {
+      const dateKey = bfRecord.date.split('T')[0].split(' ')[0];
+      const weightEntry = weightHistory.find(w => w.date === dateKey);
+      if (weightEntry) {
+        weightEntry.bodyFat = bfRecord.value;
+      }
+    });
+  }
+
   return {
     strengthWorkoutData,
     conditioningSessions,
-    avgRestingHR
+    avgRestingHR,
+    dailyCalorieIntake,
+    weightHistory
   };
 }
 
@@ -938,6 +974,17 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
       // Mark Apple Health as source for lean mass
       data.measurements.sources = data.measurements.sources || {};
       data.measurements.sources.leanMass = 'Apple Health';
+    }
+
+    // Store dietary calorie intake data
+    if (processed.dailyCalorieIntake && Object.keys(processed.dailyCalorieIntake).length > 0) {
+      data.nutrition = data.nutrition || {};
+      data.nutrition.dailyCalorieIntake = processed.dailyCalorieIntake;
+    }
+
+    // Store weight history for trend graphs
+    if (processed.weightHistory && processed.weightHistory.length > 0) {
+      data.measurements.history = processed.weightHistory;
     }
 
     data.lastSync = new Date().toISOString();

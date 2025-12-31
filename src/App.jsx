@@ -859,11 +859,11 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth }) => {
   }, [workouts, conditioning]);
 
   // Recovery score: increases with rest days, decreases with high RPE
-  // Rest days: 0-7 days (7 days = max benefit)
-  // RPE: 0-10 (higher = more fatigue)
-  const restScore = Math.min(100, (restDays / 7) * 100); // 7 days = 100%
-  const rpeScore = Math.max(0, 100 - (stats.avgRPE * 10)); // RPE 10 = 0%, RPE 0 = 100%
-  const recovery = Math.round(restScore * 0.6 + rpeScore * 0.4); // 60% rest, 40% RPE
+  // Rest days: 0-3 days (3 days = full recovery)
+  // RPE: 0-10 (higher = more fatigue, but capped impact)
+  const restScore = Math.min(100, (restDays / 3) * 100); // 3 days = 100%
+  const rpeScore = Math.max(0, 100 - (stats.avgRPE * 8)); // RPE 10 = 20%, RPE 0 = 100%
+  const recovery = Math.round(restScore * 0.75 + rpeScore * 0.25); // 75% rest, 25% RPE
   const recColor = recovery >= 70 ? '#10B981' : recovery >= 40 ? '#F59E0B' : '#EF4444';
 
   return (
@@ -1164,7 +1164,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                   { l: 'Avg HR', v: `${cur.avgHR} bpm`, p: prev.avgHR },
                   { l: 'Max HR', v: `${cur.maxHR} bpm`, p: prev.maxHR, hl: true },
                   { l: 'Calories', v: cur.totalCalories, p: prev.totalCalories },
-                  { l: 'Distance', v: `${(cur.totalDistance * 0.621371).toFixed(2)} mi`, p: parseFloat(prev.totalDistance || 0) * 0.621371 },
+                  { l: 'Distance', v: `${Math.round(cur.totalDistance * 0.621371)} mi`, p: parseFloat(prev.totalDistance || 0) * 0.621371 },
                   { l: 'Avg Pace', v: formatPace(cur.avgPace), p: prev.avgPace, isPace: true },
                 ].map((s, i) => {
                   const n = typeof s.v === 'string' ? parseFloat(s.v) : s.v;
@@ -1355,7 +1355,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                     <div><p className="text-xs text-gray-500">Duration</p><p className="text-sm font-bold text-white">{formatDuration(s.duration)}</p></div>
                     <div><p className="text-xs text-gray-500">Avg HR</p><p className="text-sm font-bold text-white">{s.avgHeartRate}</p></div>
                     <div><p className="text-xs text-gray-500">Calories</p><p className="text-sm font-bold text-white">{s.activeCalories}</p></div>
-                    {s.distance && <div><p className="text-xs text-gray-500">Distance</p><p className="text-sm font-bold text-white">{(s.distance * 0.621371).toFixed(2)} mi</p></div>}
+                    {s.distance && <div><p className="text-xs text-gray-500">Distance</p><p className="text-sm font-bold text-white">{Math.round(s.distance * 0.621371)} mi</p></div>}
                   </div>
                 </div>
               </div>
