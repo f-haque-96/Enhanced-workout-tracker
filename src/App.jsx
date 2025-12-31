@@ -667,9 +667,10 @@ const MeasurementsCard = ({ measurements }) => {
           <div className="mt-3 space-y-1.5">
             {[{ label: 'Chest', cur: current.chest, start: starting.chest }, { label: 'Biceps', cur: current.biceps, start: starting.biceps }].map(m => {
               if (!m.cur) return null;
-              const curInches = (m.cur / 2.54).toFixed(1);
-              const startInches = m.start ? (m.start / 2.54).toFixed(1) : null;
-              const diffInches = startInches ? (curInches - startInches).toFixed(1) : null;
+              // Values are already in inches from Hevy CSV - no conversion needed
+              const curInches = m.cur.toFixed(1);
+              const startInches = m.start ? m.start.toFixed(1) : null;
+              const diffInches = startInches ? (m.cur - m.start).toFixed(1) : null;
               return (
                 <div key={m.label} className="flex items-center justify-between py-1 text-sm">
                   <span className="text-gray-400">{m.label}</span>

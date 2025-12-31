@@ -594,23 +594,23 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       'left_calf_cm': 'leftCalf',
       'right_calf_cm': 'rightCalf',
 
-      // Measurements in INCHES (Hevy's actual format)
-      'neck_in': 'neck_in',
-      'shoulder_in': 'shoulders_in',
-      'chest_in': 'chest_in',
-      'left_bicep_in': 'leftBicep_in',
-      'right_bicep_in': 'rightBicep_in',
-      'bicep_in': 'biceps_in',
-      'left_forearm_in': 'leftForearm_in',
-      'right_forearm_in': 'rightForearm_in',
-      'abdomen_in': 'abdomen_in',
-      'waist_in': 'waist_in',
-      'hips_in': 'hips_in',
-      'left_thigh_in': 'leftThigh_in',
-      'right_thigh_in': 'rightThigh_in',
-      'thigh_in': 'thighs_in',
-      'left_calf_in': 'leftCalf_in',
-      'right_calf_in': 'rightCalf_in',
+      // Measurements in INCHES (Hevy's actual format) - store as-is, NO conversion
+      'neck_in': 'neck',
+      'shoulder_in': 'shoulders',
+      'chest_in': 'chest',
+      'left_bicep_in': 'leftBicep',
+      'right_bicep_in': 'rightBicep',
+      'bicep_in': 'biceps',
+      'left_forearm_in': 'leftForearm',
+      'right_forearm_in': 'rightForearm',
+      'abdomen_in': 'abdomen',
+      'waist_in': 'waist',
+      'hips_in': 'hips',
+      'left_thigh_in': 'leftThigh',
+      'right_thigh_in': 'rightThigh',
+      'thigh_in': 'thighs',
+      'left_calf_in': 'leftCalf',
+      'right_calf_in': 'rightCalf',
     };
 
     const measurements = [];
@@ -625,17 +625,12 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
         const mappedKey = columnMap[header];
         if (mappedKey && values[idx] && values[idx] !== '') {
           if (mappedKey === 'date') {
-            row[mappedKey] = values[idx];
+            row[mappedKey] = parseHevyDate(values[idx]);
           } else {
             const val = parseFloat(values[idx]);
             if (!isNaN(val)) {
-              // Convert inches to centimeters (1 inch = 2.54 cm)
-              if (mappedKey.endsWith('_in')) {
-                const baseKey = mappedKey.replace('_in', '');
-                row[baseKey] = val * 2.54;
-              } else {
-                row[mappedKey] = val;
-              }
+              // Store inches as-is - NO conversion to cm
+              row[mappedKey] = val;
             }
           }
         }
