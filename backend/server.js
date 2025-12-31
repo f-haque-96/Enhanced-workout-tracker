@@ -655,17 +655,26 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
     measurements.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     // Find the row with the most body measurements (not just weight)
+    // EXCLUDE rows with weight: 0 (invalid placeholder rows)
     const rowsWithMeasurements = measurements.filter(m =>
-      m.chest || m.biceps || m.waist || m.thighs
+      (m.chest || m.biceps || m.waist || m.thighs) && m.weight !== 0
     );
 
-    // Use most recent row with full measurements, or just most recent
-    const latestWithMeasurements = rowsWithMeasurements[0] || measurements[0];
-    const latestWeight = measurements.find(m => m.weight !== null);
-    const latestBodyFat = measurements.find(m => m.bodyFat !== null);
+    console.log(`Found ${rowsWithMeasurements.length} rows with valid body measurements (excluding weight: 0 rows)`);
+
+    // Use most recent row with full measurements, or fall back to most recent with valid weight
+    const latestWithMeasurements = rowsWithMeasurements[0] || measurements.find(m => m.weight > 0) || measurements[0];
+    const latestWeight = measurements.find(m => m.weight !== null && m.weight > 0);
+    const latestBodyFat = measurements.find(m => m.bodyFat !== null && m.bodyFat > 0);
     const oldest = measurements[measurements.length - 1];
 
-    console.log('Latest with measurements:', latestWithMeasurements);
+    console.log('Selected row for measurements:', {
+      date: latestWithMeasurements.date,
+      weight: latestWithMeasurements.weight,
+      chest: latestWithMeasurements.chest,
+      leftBicep: latestWithMeasurements.leftBicep,
+      rightBicep: latestWithMeasurements.rightBicep
+    });
     console.log('Latest weight:', latestWeight?.weight);
     console.log('Latest bodyFat:', latestBodyFat?.bodyFat);
 
