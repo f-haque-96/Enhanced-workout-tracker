@@ -6,7 +6,11 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git pull:*)",
-      "Bash(scp:*)"
+      "Bash(scp:*)",
+      "Bash(cat:*)",
+      "Bash(node -e:*)",
+      "Bash(node test-parse.js)",
+      "Bash(git reset:*)"
     ]
   }
 }

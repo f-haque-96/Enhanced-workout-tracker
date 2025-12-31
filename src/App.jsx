@@ -858,7 +858,12 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth }) => {
     return { avgRPE: rpeC > 0 ? (rpeT / rpeC).toFixed(1) : 0, warmupSets: warm, workingSets: work, failureSets: fail, weeklyCalories: Math.round(cal) };
   }, [workouts, conditioning]);
 
-  const recovery = Math.max(0, Math.min(100, 100 - (restDays * 15) - (stats.avgRPE * 5)));
+  // Recovery score: increases with rest days, decreases with high RPE
+  // Rest days: 0-7 days (7 days = max benefit)
+  // RPE: 0-10 (higher = more fatigue)
+  const restScore = Math.min(100, (restDays / 7) * 100); // 7 days = 100%
+  const rpeScore = Math.max(0, 100 - (stats.avgRPE * 10)); // RPE 10 = 0%, RPE 0 = 100%
+  const recovery = Math.round(restScore * 0.6 + rpeScore * 0.4); // 60% rest, 40% RPE
   const recColor = recovery >= 70 ? '#10B981' : recovery >= 40 ? '#F59E0B' : '#EF4444';
 
   return (
@@ -907,11 +912,13 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth }) => {
 // ACHIEVEMENT PANEL
 // ============================================
 const AchievementPanel = ({ workouts, conditioning, bodyweight }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+
   const ach = useMemo(() => {
     const earned = [], inProgress = [];
     let vol = 0, fail = 0;
     const lifts = { incline: 0, shoulder: 0, squat: 0, lat: 0, deadlift: 0 };
-    
+
     workouts.forEach(w => w.exercises.forEach(ex => {
       const m = matchKeyLift(ex.title);
       ex.sets.forEach(s => {
@@ -927,50 +934,61 @@ const AchievementPanel = ({ workouts, conditioning, bodyweight }) => {
         }
       });
     }));
-    
+
     let swimD = 0, walkD = 0, cal = 0;
     conditioning.forEach(c => { cal += (c.calories || 0); if (c.category === 'swimming' && c.distance) swimD += c.distance; if (c.category === 'walking' && c.distance) walkD += c.distance; });
-    
+
     if (lifts.incline >= bodyweight) earned.push({ ...ACHIEVEMENTS.inclineBW }); else inProgress.push({ ...ACHIEVEMENTS.inclineBW, progress: Math.round(lifts.incline / bodyweight * 100), target: 100 });
     if (lifts.shoulder >= bodyweight * 0.7) earned.push({ ...ACHIEVEMENTS.shoulderPress0_7 }); else inProgress.push({ ...ACHIEVEMENTS.shoulderPress0_7, progress: Math.round(lifts.shoulder / (bodyweight * 0.7) * 100), target: 100 });
     if (lifts.squat >= bodyweight * 2) earned.push({ ...ACHIEVEMENTS.squat2x }); else if (lifts.squat >= bodyweight * 1.5) { earned.push({ ...ACHIEVEMENTS.squat1_5x }); inProgress.push({ ...ACHIEVEMENTS.squat2x, progress: Math.round(lifts.squat / (bodyweight * 2) * 100), target: 100 }); } else inProgress.push({ ...ACHIEVEMENTS.squat1_5x, progress: Math.round(lifts.squat / (bodyweight * 1.5) * 100), target: 100 });
     if (lifts.lat >= bodyweight) earned.push({ ...ACHIEVEMENTS.latPulldownBW }); else inProgress.push({ ...ACHIEVEMENTS.latPulldownBW, progress: Math.round(lifts.lat / bodyweight * 100), target: 100 });
     if (lifts.deadlift >= bodyweight * 2) earned.push({ ...ACHIEVEMENTS.deadlift2x }); else if (lifts.deadlift >= bodyweight * 1.5) { earned.push({ ...ACHIEVEMENTS.deadlift1_5x }); inProgress.push({ ...ACHIEVEMENTS.deadlift2x, progress: Math.round(lifts.deadlift / (bodyweight * 2) * 100), target: 100 }); } else inProgress.push({ ...ACHIEVEMENTS.deadlift1_5x, progress: Math.round(lifts.deadlift / (bodyweight * 1.5) * 100), target: 100 });
-    
+
     const wc = workouts.length;
     if (wc >= 100) earned.push({ ...ACHIEVEMENTS.workouts100 }); else if (wc >= 50) { earned.push({ ...ACHIEVEMENTS.workouts50 }); inProgress.push({ ...ACHIEVEMENTS.workouts100, progress: wc, target: 100 }); } else if (wc >= 10) { earned.push({ ...ACHIEVEMENTS.workouts10 }); inProgress.push({ ...ACHIEVEMENTS.workouts50, progress: wc, target: 50 }); } else inProgress.push({ ...ACHIEVEMENTS.workouts10, progress: wc, target: 10 });
-    
+
     if (fail >= 50) earned.push({ ...ACHIEVEMENTS.failureKing }); else inProgress.push({ ...ACHIEVEMENTS.failureKing, progress: fail, target: 50 });
     if (vol >= 100000) earned.push({ ...ACHIEVEMENTS.volumeMonster }); else inProgress.push({ ...ACHIEVEMENTS.volumeMonster, progress: (vol / 1000).toFixed(1), target: 100, unit: 't' });
     if (cal >= 10000) earned.push({ ...ACHIEVEMENTS.caloriesBurner }); else inProgress.push({ ...ACHIEVEMENTS.caloriesBurner, progress: Math.round(cal), target: 10000 });
     if (swimD >= 1.6) earned.push({ ...ACHIEVEMENTS.swimmerMile }); else if (swimD > 0) inProgress.push({ ...ACHIEVEMENTS.swimmerMile, progress: swimD.toFixed(2), target: 1.6, unit: 'km' });
     if (walkD >= 42) earned.push({ ...ACHIEVEMENTS.walkMarathon }); else inProgress.push({ ...ACHIEVEMENTS.walkMarathon, progress: walkD.toFixed(1), target: 42, unit: 'km' });
-    
+
     return { earned, inProgress, lifts };
   }, [workouts, conditioning, bodyweight]);
-  
+
   return (
     <div className="card h-full">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2"><Award className="text-amber-400" size={20} /><h3 className="text-lg font-semibold text-white">Achievements</h3></div>
+      <div
+        className="flex items-center justify-between mb-4 cursor-pointer hover:opacity-80 transition-opacity"
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex items-center gap-2">
+          <Award className="text-amber-400" size={20} />
+          <h3 className="text-lg font-semibold text-white">Achievements</h3>
+          {isExpanded ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+        </div>
         <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-400">{ach.earned.length} Earned</span>
       </div>
-      <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/20">
-        <p className="text-xs text-gray-400 mb-2">Key Lifts (1RM)</p>
-        <div className="grid grid-cols-5 gap-2 text-center">
-          {[{ n: 'Inc', v: ach.lifts.incline }, { n: 'OHP', v: ach.lifts.shoulder }, { n: 'Sqt', v: ach.lifts.squat }, { n: 'Lat', v: ach.lifts.lat }, { n: 'DL', v: ach.lifts.deadlift }].map(l => (
-            <div key={l.n} className="min-w-[50px]">
-              <div className="text-sm sm:text-lg font-bold text-white whitespace-nowrap">
-                {l.v}
-                <span className="text-[10px] text-gray-400">kg</span>
-              </div>
-              <div className="text-[9px] sm:text-[10px] text-gray-500 truncate">{l.n}</div>
+      {isExpanded && (
+        <>
+          <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/20">
+            <p className="text-xs text-gray-400 mb-2">Key Lifts (1RM)</p>
+            <div className="grid grid-cols-5 gap-2 text-center">
+              {[{ n: 'Inc', v: ach.lifts.incline }, { n: 'OHP', v: ach.lifts.shoulder }, { n: 'Sqt', v: ach.lifts.squat }, { n: 'Lat', v: ach.lifts.lat }, { n: 'DL', v: ach.lifts.deadlift }].map(l => (
+                <div key={l.n} className="min-w-[50px]">
+                  <div className="text-sm sm:text-lg font-bold text-white whitespace-nowrap">
+                    {l.v}
+                    <span className="text-[10px] text-gray-400">kg</span>
+                  </div>
+                  <div className="text-[9px] sm:text-[10px] text-gray-500 truncate">{l.n}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
-      {ach.earned.length > 0 && <div className="mb-3"><p className="text-xs text-gray-500 mb-2">EARNED</p><div className="grid grid-cols-2 gap-2">{ach.earned.slice(0, 4).map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/10"><div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${a.color}20` }}><a.icon size={14} style={{ color: a.color }} /></div><p className="text-[11px] font-medium text-white truncate">{a.title}</p></div>)}</div></div>}
-      <div><p className="text-xs text-gray-500 mb-2">IN PROGRESS</p><div className="space-y-2">{ach.inProgress.slice(0, 3).map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5"><div className="w-7 h-7 rounded-lg flex items-center justify-center bg-white/10"><a.icon size={14} className="text-gray-400" /></div><div className="flex-1"><div className="flex items-center justify-between mb-1"><p className="text-[11px] font-medium text-white">{a.title}</p><p className="text-[10px] text-gray-400">{a.progress}{a.unit || ''}/{a.target}{a.unit || ''}</p></div><ProgressBar value={parseFloat(a.progress)} max={a.target} color={a.color} height={3} /></div></div>)}</div></div>
+          </div>
+          {ach.earned.length > 0 && <div className="mb-3"><p className="text-xs text-gray-500 mb-2">EARNED</p><div className="grid grid-cols-2 gap-2">{ach.earned.slice(0, 4).map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/10"><div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${a.color}20` }}><a.icon size={14} style={{ color: a.color }} /></div><p className="text-[11px] font-medium text-white truncate">{a.title}</p></div>)}</div></div>}
+          <div><p className="text-xs text-gray-500 mb-2">IN PROGRESS</p><div className="space-y-2">{ach.inProgress.slice(0, 3).map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5"><div className="w-7 h-7 rounded-lg flex items-center justify-center bg-white/10"><a.icon size={14} className="text-gray-400" /></div><div className="flex-1"><div className="flex items-center justify-between mb-1"><p className="text-[11px] font-medium text-white">{a.title}</p><p className="text-[10px] text-gray-400">{a.progress}{a.unit || ''}/{a.target}{a.unit || ''}</p></div><ProgressBar value={parseFloat(a.progress)} max={a.target} color={a.color} height={3} /></div></div>)}</div></div>
+        </>
+      )}
     </div>
   );
 };
@@ -1146,7 +1164,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                   { l: 'Avg HR', v: `${cur.avgHR} bpm`, p: prev.avgHR },
                   { l: 'Max HR', v: `${cur.maxHR} bpm`, p: prev.maxHR, hl: true },
                   { l: 'Calories', v: cur.totalCalories, p: prev.totalCalories },
-                  { l: 'Distance', v: `${cur.totalDistance} km`, p: parseFloat(prev.totalDistance || 0) },
+                  { l: 'Distance', v: `${(cur.totalDistance * 0.621371).toFixed(2)} mi`, p: parseFloat(prev.totalDistance || 0) * 0.621371 },
                   { l: 'Avg Pace', v: formatPace(cur.avgPace), p: prev.avgPace, isPace: true },
                 ].map((s, i) => {
                   const n = typeof s.v === 'string' ? parseFloat(s.v) : s.v;
@@ -1337,7 +1355,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                     <div><p className="text-xs text-gray-500">Duration</p><p className="text-sm font-bold text-white">{formatDuration(s.duration)}</p></div>
                     <div><p className="text-xs text-gray-500">Avg HR</p><p className="text-sm font-bold text-white">{s.avgHeartRate}</p></div>
                     <div><p className="text-xs text-gray-500">Calories</p><p className="text-sm font-bold text-white">{s.activeCalories}</p></div>
-                    {s.distance && <div><p className="text-xs text-gray-500">Distance</p><p className="text-sm font-bold text-white">{s.distance}km</p></div>}
+                    {s.distance && <div><p className="text-xs text-gray-500">Distance</p><p className="text-sm font-bold text-white">{(s.distance * 0.621371).toFixed(2)} mi</p></div>}
                   </div>
                 </div>
               </div>
