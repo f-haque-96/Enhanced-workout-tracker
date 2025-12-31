@@ -862,7 +862,8 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
         }
       });
       
-      const sorted = Object.entries(exercises).sort((a, b) => b[1].vol - a[1].vol).slice(0, 8);
+      // Filter out warmup-only exercises (test data) before sorting
+      const sorted = Object.entries(exercises).filter(([name, data]) => data.sets > 0).sort((a, b) => b[1].vol - a[1].vol).slice(0, 8);
       const forecasts = sorted.slice(0, 3).map(([n, d]) => {
         const h = d.hist.sort((a, b) => new Date(a.date) - new Date(b.date));
         const cur = h.length > 0 ? h[h.length - 1].oneRM : 0;
@@ -1123,7 +1124,17 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
             {filteredWorkouts.map(w => {
               const expanded = expandedWorkouts[w.id];
               const dur = (new Date(w.end_time) - new Date(w.start_time)) / 1000;
-              const catEx = w.exercises.filter(e => categorizeExercise(e.title).category === activeTab);
+              // Filter exercises by category and exclude warmup-only exercises (test data from Hevy)
+              const catEx = w.exercises.filter(e => {
+                const { category } = categorizeExercise(e.title);
+                if (category !== activeTab) return false;
+                // For strength workouts, exclude exercises with 0 working/failure sets (warmup-only)
+                if (activeTab !== 'conditioning') {
+                  const workingSets = e.sets.filter(s => s.set_type !== 'warmup').length;
+                  if (workingSets === 0) return false;
+                }
+                return true;
+              });
               const stats = catEx.reduce((a, e) => { e.sets.forEach(s => { if (s.set_type === 'warmup') a.warm++; else if (s.set_type === 'failure') a.fail++; else a.work++; }); return a; }, { warm: 0, work: 0, fail: 0 });
               const byMuscle = catEx.reduce((a, e) => { const { muscle } = categorizeExercise(e.title); if (!a[muscle]) a[muscle] = []; a[muscle].push(e); return a; }, {});
               
