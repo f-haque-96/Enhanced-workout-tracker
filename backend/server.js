@@ -504,6 +504,27 @@ app.post('/api/hevy/upload', upload.single('file'), async (req, res) => {
 });
 
 // Upload Hevy measurements CSV
+// Parse Hevy date format: "14 Jan 2025, 00:00"
+function parseHevyDate(dateStr) {
+  if (!dateStr) return null;
+  const clean = dateStr.replace(/"/g, '').trim();
+  
+  // Try parsing directly first
+  const date = new Date(clean);
+  if (!isNaN(date.getTime())) return date.toISOString();
+  
+  // Manual parsing for "14 Jan 2025, 00:00" format
+  const match = clean.match(/(d{1,2})s+(w+)s+(d{4})/);
+  if (match) {
+    const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+    const parsed = new Date(parseInt(match[3]), months[match[2]], parseInt(match[1]));
+    return parsed.toISOString();
+  }
+  
+  return null;
+}
+
+
 app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
