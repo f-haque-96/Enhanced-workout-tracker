@@ -525,7 +525,7 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
 
     // Parse header row - normalize column names
     const headers = lines[0].split(delimiter).map(h =>
-      h.trim().toLowerCase()
+      h.trim().replace(/^"|"$/g, '').toLowerCase()
         .replace(/[()]/g, '')           // Remove parentheses
         .replace(/\s+/g, '_')           // Replace spaces with underscore
         .replace(/%/g, 'pct')           // Replace % with pct
