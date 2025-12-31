@@ -317,7 +317,7 @@ function processAppleHealthData(parsedData) {
   
   // Process workouts
   parsedData.workouts.forEach(workout => {
-    const dateKey = workout.date.split('T')[0]; // YYYY-MM-DD
+    const dateKey = workout.startDate.split('T')[0]; // YYYY-MM-DD
     
     if (workout.category === 'strength') {
       // Group strength workouts by date
@@ -339,7 +339,7 @@ function processAppleHealthData(parsedData) {
     } else {
       // Add to conditioning sessions
       conditioningSessions.push({
-        date: workout.date,
+        date: workout.startDate,
         type: workout.type,
         category: workout.category,
         duration: workout.duration,
