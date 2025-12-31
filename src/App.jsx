@@ -95,7 +95,7 @@ const HEVY_CATEGORIES = {
     neck: ['Neck Curl', 'Neck Extension', 'Neck Flexion']
   },
   pull: {
-    back: ['Deadlift', 'Barbell Row', 'Dumbbell Row', 'Lat Pulldown', 'Pull Up', 'Chin Up', 'Cable Row', 'T-Bar Row', 'Seated Row', 'Pendlay Row'],
+    back: ['Deadlift', 'Barbell Row', 'Dumbbell Row', 'Lat Pulldown', 'Pull Up', 'Chin Up', 'Cable Row', 'T-Bar Row', 'Seated Row', 'Pendlay Row', 'Machine Row', 'Iso-Lateral Row', 'Lever Row', 'Row'],
     biceps: ['Bicep Curl', 'Hammer Curl', 'Preacher Curl', 'Concentration Curl', 'Cable Curl', 'EZ Bar Curl', 'Incline Curl'],
     rear_delts: ['Reverse Fly', 'Face Pull', 'Rear Delt Row', 'Band Pull Apart']
   },
