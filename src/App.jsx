@@ -380,41 +380,36 @@ const Tooltip = ({ children, content, position = 'top' }) => {
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const triggerRef = useRef(null);
 
-  const updatePosition = () => {
+  const handleMouseEnter = () => {
     if (!triggerRef.current) return;
+
     const rect = triggerRef.current.getBoundingClientRect();
-    const scrollY = window.scrollY;
-    const scrollX = window.scrollX;
 
     let top, left;
 
     switch (position) {
       case 'top':
-        top = rect.top + scrollY - 8;
-        left = rect.left + scrollX + rect.width / 2;
+        top = rect.top - 8;
+        left = rect.left + rect.width / 2;
         break;
       case 'bottom':
-        top = rect.bottom + scrollY + 8;
-        left = rect.left + scrollX + rect.width / 2;
+        top = rect.bottom + 8;
+        left = rect.left + rect.width / 2;
         break;
       case 'left':
-        top = rect.top + scrollY + rect.height / 2;
-        left = rect.left + scrollX - 8;
+        top = rect.top + rect.height / 2;
+        left = rect.left - 8;
         break;
       case 'right':
-        top = rect.top + scrollY + rect.height / 2;
-        left = rect.right + scrollX + 8;
+        top = rect.top + rect.height / 2;
+        left = rect.right + 8;
         break;
       default:
-        top = rect.top + scrollY - 8;
-        left = rect.left + scrollX + rect.width / 2;
+        top = rect.top - 8;
+        left = rect.left + rect.width / 2;
     }
 
     setCoords({ top, left });
-  };
-
-  const handleMouseEnter = () => {
-    updatePosition();
     setShow(true);
   };
 
@@ -429,7 +424,7 @@ const Tooltip = ({ children, content, position = 'top' }) => {
     <>
       <span
         ref={triggerRef}
-        className="relative inline-block"
+        className="inline-block"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setShow(false)}
       >
@@ -439,8 +434,8 @@ const Tooltip = ({ children, content, position = 'top' }) => {
         <div
           className={`fixed ${positionClasses[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs whitespace-normal pointer-events-none`}
           style={{
-            top: coords.top,
-            left: coords.left,
+            top: `${coords.top}px`,
+            left: `${coords.left}px`,
             zIndex: 99999
           }}
         >
