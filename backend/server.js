@@ -308,6 +308,65 @@ app.get('/api/hevy/workouts/:id', async (req, res) => {
 });
 
 // Helper function to parse CSV line with quoted fields
+// ============================================
+// APPLE HEALTH DATA PROCESSOR
+// ============================================
+function processAppleHealthData(parsedData) {
+  const strengthWorkoutData = {};
+  const conditioningSessions = [];
+  
+  // Process workouts
+  parsedData.workouts.forEach(workout => {
+    const dateKey = workout.date.split('T')[0]; // YYYY-MM-DD
+    
+    if (workout.category === 'strength') {
+      // Group strength workouts by date
+      if (!strengthWorkoutData[dateKey]) {
+        strengthWorkoutData[dateKey] = {
+          sessions: [],
+          totalCalories: 0,
+          totalDuration: 0
+        };
+      }
+      
+      strengthWorkoutData[dateKey].sessions.push({
+        type: workout.type,
+        duration: workout.duration,
+        calories: workout.calories
+      });
+      strengthWorkoutData[dateKey].totalCalories += workout.calories || 0;
+      strengthWorkoutData[dateKey].totalDuration += workout.duration || 0;
+    } else {
+      // Add to conditioning sessions
+      conditioningSessions.push({
+        date: workout.date,
+        type: workout.type,
+        category: workout.category,
+        duration: workout.duration,
+        calories: workout.calories,
+        distance: workout.distance
+      });
+    }
+  });
+  
+  // Sort conditioning sessions by date (newest first)
+  conditioningSessions.sort((a, b) => new Date(b.date) - new Date(a.date));
+  
+  // Calculate average resting heart rate
+  let avgRestingHR = null;
+  if (parsedData.restingHRRecords && parsedData.restingHRRecords.length > 0) {
+    const sum = parsedData.restingHRRecords.reduce((acc, record) => acc + record.value, 0);
+    avgRestingHR = Math.round(sum / parsedData.restingHRRecords.length);
+  }
+  
+  return {
+    strengthWorkoutData,
+    conditioningSessions,
+    avgRestingHR
+  };
+}
+
+
 function parseCSVLine(line) {
   const result = [];
   let current = '';
