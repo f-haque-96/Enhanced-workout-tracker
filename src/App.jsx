@@ -378,9 +378,9 @@ const Tooltip = ({ children, content, position = 'top' }) => {
   const [show, setShow] = useState(false);
   const pos = { top: 'bottom-full left-1/2 -translate-x-1/2 mb-2', bottom: 'top-full left-1/2 -translate-x-1/2 mt-2', left: 'right-full top-1/2 -translate-y-1/2 mr-2', right: 'left-full top-1/2 -translate-y-1/2 ml-2' };
   return (
-    <span className="relative inline-block" style={{ zIndex: 1 }} onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <span className="relative inline-block" style={{ isolation: 'isolate' }} onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
       {children}
-      {show && <span className={`absolute ${pos[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs pointer-events-none whitespace-normal`} style={{ zIndex: 999999 }}>{content}</span>}
+      {show && <span className={`absolute z-[9999] ${pos[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs pointer-events-none whitespace-normal`}>{content}</span>}
     </span>
   );
 };
@@ -439,7 +439,7 @@ const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth,
         <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-slate-900 border border-white/10 shadow-xl z-[9999]">
           <div className="p-2 border-b border-white/10">
             <p className="text-xs text-gray-500 px-2 py-1">Upload</p>
-            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy Workouts (JSON)</span><input type="file" accept=".json" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
+            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy Workouts (JSON/CSV)</span><input type="file" accept=".json,.csv" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-blue-400" /><span className="text-sm text-white">Hevy Measurements (CSV)</span><input type="file" accept=".csv" onChange={(e) => { onUploadHevyMeasurements(e); setIsOpen(false); }} className="hidden" /></label>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-pink-400" /><span className="text-sm text-white">Apple Health (XML)</span><input type="file" accept=".xml,.zip" onChange={(e) => { onUploadAppleHealth(e); setIsOpen(false); }} className="hidden" /></label>
           </div>
