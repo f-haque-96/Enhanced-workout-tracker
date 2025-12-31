@@ -89,9 +89,10 @@ const KEY_LIFTS_CONFIG = {
 // Full Hevy exercise categories
 const HEVY_CATEGORIES = {
   push: {
-    chest: ['Bench Press', 'Incline Bench Press', 'Decline Bench Press', 'Chest Fly', 'Cable Fly', 'Dumbbell Press', 'Push Up', 'Dip', 'Pec Deck', 'Machine Chest Press'],
+    chest: ['Bench Press', 'Incline Bench Press', 'Decline Bench Press', 'Chest Fly', 'Cable Fly', 'Dumbbell Press', 'Push Up', 'Push-Up', 'Pushup', 'Dip', 'Pec Deck', 'Machine Chest Press'],
     shoulders: ['Overhead Press', 'Shoulder Press', 'Lateral Raise', 'Front Raise', 'Arnold Press', 'Military Press', 'Upright Row'],
-    triceps: ['Tricep Extension', 'Tricep Pushdown', 'Skull Crusher', 'Close Grip Bench', 'Overhead Extension', 'Kickback', 'Rope Pushdown']
+    triceps: ['Tricep Extension', 'Triceps Extension', 'Tricep Pushdown', 'Triceps Pushdown', 'Skull Crusher', 'Close Grip Bench', 'Overhead Extension', 'Overhead Tricep', 'Overhead Triceps', 'Kickback', 'Rope Pushdown'],
+    neck: ['Neck Curl', 'Neck Extension', 'Neck Flexion']
   },
   pull: {
     back: ['Deadlift', 'Barbell Row', 'Dumbbell Row', 'Lat Pulldown', 'Pull Up', 'Chin Up', 'Cable Row', 'T-Bar Row', 'Seated Row', 'Pendlay Row'],
