@@ -318,24 +318,37 @@ function processAppleHealthData(parsedData) {
   // Process workouts
   parsedData.workouts.forEach(workout => {
     const dateKey = workout.startDate.split('T')[0]; // YYYY-MM-DD
-    
+
     if (workout.category === 'strength') {
-      // Group strength workouts by date
+      // Store strength workout data for merging with Hevy workouts by date
+      // If multiple strength workouts on same day, aggregate them
       if (!strengthWorkoutData[dateKey]) {
         strengthWorkoutData[dateKey] = {
-          sessions: [],
-          totalCalories: 0,
-          totalDuration: 0
+          duration: workout.duration || 0,
+          activeCalories: Math.round(workout.calories || 0),
+          avgHeartRate: workout.avgHeartRate || null,
+          maxHeartRate: workout.maxHeartRate || null,
+          source: 'Apple Health',
+          sessionCount: 1
         };
+      } else {
+        // Aggregate multiple sessions on same day
+        strengthWorkoutData[dateKey].duration += workout.duration || 0;
+        strengthWorkoutData[dateKey].activeCalories += Math.round(workout.calories || 0);
+        // Average the heart rates
+        if (workout.avgHeartRate) {
+          const prevAvg = strengthWorkoutData[dateKey].avgHeartRate || 0;
+          const count = strengthWorkoutData[dateKey].sessionCount;
+          strengthWorkoutData[dateKey].avgHeartRate = Math.round((prevAvg * count + workout.avgHeartRate) / (count + 1));
+        }
+        if (workout.maxHeartRate) {
+          strengthWorkoutData[dateKey].maxHeartRate = Math.max(
+            strengthWorkoutData[dateKey].maxHeartRate || 0,
+            workout.maxHeartRate
+          );
+        }
+        strengthWorkoutData[dateKey].sessionCount += 1;
       }
-      
-      strengthWorkoutData[dateKey].sessions.push({
-        type: workout.type,
-        duration: workout.duration,
-        calories: workout.calories
-      });
-      strengthWorkoutData[dateKey].totalCalories += workout.calories || 0;
-      strengthWorkoutData[dateKey].totalDuration += workout.duration || 0;
     } else {
       // Add to conditioning sessions
       conditioningSessions.push({
@@ -662,11 +675,24 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       return left || right || null;
     };
 
+    // Apple Health has PRIORITY over Hevy for weight/bodyFat
+    // Hevy is only used for body measurements (chest, biceps, waist, etc.)
+    const sources = data.measurements.sources || {};
+    const appleHealthHasWeight = sources.weight === 'Apple Health';
+    const appleHealthHasBodyFat = sources.bodyFat === 'Apple Health';
+
     // Update current measurements (preserve existing data if not in CSV)
     data.measurements.current = {
       ...data.measurements.current,
-      weight: latest.weight || data.measurements.current?.weight || null,
-      bodyFat: latest.bodyFat || data.measurements.current?.bodyFat || null,
+      // Only update weight if Apple Health hasn't set it
+      weight: appleHealthHasWeight
+        ? data.measurements.current?.weight
+        : (latest.weight || data.measurements.current?.weight || null),
+      // Only update bodyFat if Apple Health hasn't set it
+      bodyFat: appleHealthHasBodyFat
+        ? data.measurements.current?.bodyFat
+        : (latest.bodyFat || data.measurements.current?.bodyFat || null),
+      // Hevy only for body measurements (Apple doesn't track these)
       neck: latest.neck || data.measurements.current?.neck || null,
       shoulders: latest.shoulders || data.measurements.current?.shoulders || null,
       chest: latest.chest || data.measurements.current?.chest || null,
@@ -681,8 +707,15 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
     // Update starting measurements
     data.measurements.starting = {
       ...data.measurements.starting,
-      weight: oldest.weight || data.measurements.starting?.weight || null,
-      bodyFat: oldest.bodyFat || data.measurements.starting?.bodyFat || null,
+      // Only update weight if Apple Health hasn't set it
+      weight: appleHealthHasWeight
+        ? data.measurements.starting?.weight
+        : (oldest.weight || data.measurements.starting?.weight || null),
+      // Only update bodyFat if Apple Health hasn't set it
+      bodyFat: appleHealthHasBodyFat
+        ? data.measurements.starting?.bodyFat
+        : (oldest.bodyFat || data.measurements.starting?.bodyFat || null),
+      // Hevy only for body measurements
       neck: oldest.neck || data.measurements.starting?.neck || null,
       shoulders: oldest.shoulders || data.measurements.starting?.shoulders || null,
       chest: oldest.chest || data.measurements.starting?.chest || null,
@@ -692,6 +725,14 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       hips: oldest.hips || data.measurements.starting?.hips || null,
       thighs: avg(oldest.leftThigh, oldest.rightThigh) || data.measurements.starting?.thighs || null,
       calves: avg(oldest.leftCalf, oldest.rightCalf) || data.measurements.starting?.calves || null,
+    };
+
+    // Mark data sources - Hevy only for measurements, not weight/bodyFat if Apple Health has set them
+    data.measurements.sources = {
+      ...sources,
+      weight: appleHealthHasWeight ? 'Apple Health' : 'Hevy',
+      bodyFat: appleHealthHasBodyFat ? 'Apple Health' : 'Hevy',
+      measurements: 'Hevy'
     };
 
     data.lastSync = new Date().toISOString();
@@ -752,14 +793,31 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
     // Read existing data
     const data = readData();
 
-    // Merge strength workout data with existing Hevy workouts
+    // Merge strength workout data with existing Hevy workouts by date
+    console.log(`Merging Apple Health data with ${data.workouts.length} Hevy workouts...`);
     data.workouts = data.workouts.map(workout => {
       const dateKey = workout.start_time.split('T')[0];
-      if (processed.strengthWorkoutData[dateKey]) {
-        return { ...workout, appleHealth: processed.strengthWorkoutData[dateKey] };
+      const appleData = processed.strengthWorkoutData[dateKey];
+
+      if (appleData) {
+        console.log(`Merging Apple Health data for workout on ${dateKey}`);
+        return {
+          ...workout,
+          appleHealth: {
+            duration: appleData.duration,
+            activeCalories: appleData.activeCalories,
+            avgHeartRate: appleData.avgHeartRate,
+            maxHeartRate: appleData.maxHeartRate,
+            source: 'Apple Health'
+          }
+        };
       }
       return workout;
     });
+
+    // Log merge results
+    const mergedCount = data.workouts.filter(w => w.appleHealth).length;
+    console.log(`Merged Apple Health data with ${mergedCount} workouts`);
 
     // Set conditioning sessions (sorted newest first)
     data.conditioning = processed.conditioningSessions;
@@ -769,7 +827,7 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
       data.appleHealth.restingHeartRate = processed.avgRestingHR;
     }
 
-    // IMPORTANT: PRESERVE existing measurements, only update what Apple Health provides
+    // IMPORTANT: Apple Health has PRIORITY for weight and body fat
     // Update weight - get oldest and newest from parsed data
     if (parsedData.weightRecords.length > 0) {
       const sorted = parsedData.weightRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -789,6 +847,10 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
           weight: Math.round(currentWeight * 10) / 10
         };
       }
+
+      // Mark Apple Health as source for weight
+      data.measurements.sources = data.measurements.sources || {};
+      data.measurements.sources.weight = 'Apple Health';
     }
 
     // Update body fat - get oldest and newest from parsed data
@@ -810,6 +872,34 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
           bodyFat: Math.round(currentBodyFat * 10) / 10
         };
       }
+
+      // Mark Apple Health as source for body fat
+      data.measurements.sources = data.measurements.sources || {};
+      data.measurements.sources.bodyFat = 'Apple Health';
+    }
+
+    // Update lean body mass if available
+    if (parsedData.leanMassRecords && parsedData.leanMassRecords.length > 0) {
+      const sorted = parsedData.leanMassRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
+      const startingLeanMass = sorted[0].value;
+      const currentLeanMass = sorted[sorted.length - 1].value;
+
+      if (startingLeanMass) {
+        data.measurements.starting = {
+          ...data.measurements.starting,
+          leanMass: Math.round(startingLeanMass * 10) / 10
+        };
+      }
+      if (currentLeanMass) {
+        data.measurements.current = {
+          ...data.measurements.current,
+          leanMass: Math.round(currentLeanMass * 10) / 10
+        };
+      }
+
+      // Mark Apple Health as source for lean mass
+      data.measurements.sources = data.measurements.sources || {};
+      data.measurements.sources.leanMass = 'Apple Health';
     }
 
     data.lastSync = new Date().toISOString();
@@ -833,7 +923,8 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
           strengthWorkoutsEnriched: Object.keys(processed.strengthWorkoutData).length,
           weightRecords: parsedData.stats.weightRecordsFound,
           bodyFatRecords: parsedData.stats.bodyFatRecordsFound,
-          restingHRRecords: parsedData.stats.restingHRRecordsFound
+          restingHRRecords: parsedData.stats.restingHRRecordsFound,
+          leanMassRecords: parsedData.stats.leanMassRecordsFound
         }
       });
     } else {
@@ -852,6 +943,165 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
       error: 'Failed to process Apple Health export',
       details: error.message
     });
+  }
+});
+
+// ============================================
+// APPLE HEALTH CSV UPLOAD (Health Auto Export app)
+// ============================================
+app.post('/api/apple-health/csv/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    const lines = fileContent.trim().split('\n');
+
+    if (lines.length < 2) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'CSV file is empty' });
+    }
+
+    // Parse headers
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
+
+    // Common Health Auto Export columns:
+    // Date, Active Energy (kcal), Resting Heart Rate (bpm), Weight (kg), Body Fat (%), etc.
+
+    const results = {
+      weightRecords: [],
+      bodyFatRecords: [],
+      restingHRRecords: [],
+      leanMassRecords: [],
+      calorieRecords: [],
+      workouts: []
+    };
+
+    // Column index mapping
+    const colIndex = {
+      date: headers.findIndex(h => h.includes('date') || h.includes('time')),
+      weight: headers.findIndex(h => h.includes('weight') || h.includes('body mass')),
+      bodyFat: headers.findIndex(h => h.includes('body fat') || h.includes('fat %')),
+      leanMass: headers.findIndex(h => h.includes('lean') || h.includes('lean body mass')),
+      restingHR: headers.findIndex(h => h.includes('resting') && h.includes('heart')),
+      activeCalories: headers.findIndex(h => h.includes('active') && (h.includes('energy') || h.includes('calories'))),
+    };
+
+    // Parse data rows
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+
+      const date = colIndex.date >= 0 ? values[colIndex.date] : null;
+      if (!date) continue;
+
+      // Extract values
+      if (colIndex.weight >= 0 && values[colIndex.weight]) {
+        const weight = parseFloat(values[colIndex.weight]);
+        if (!isNaN(weight) && weight > 0) {
+          results.weightRecords.push({ date, value: weight });
+        }
+      }
+
+      if (colIndex.bodyFat >= 0 && values[colIndex.bodyFat]) {
+        const bodyFat = parseFloat(values[colIndex.bodyFat]);
+        if (!isNaN(bodyFat) && bodyFat > 0) {
+          results.bodyFatRecords.push({ date, value: bodyFat });
+        }
+      }
+
+      if (colIndex.leanMass >= 0 && values[colIndex.leanMass]) {
+        const leanMass = parseFloat(values[colIndex.leanMass]);
+        if (!isNaN(leanMass) && leanMass > 0) {
+          results.leanMassRecords.push({ date, value: leanMass });
+        }
+      }
+
+      if (colIndex.restingHR >= 0 && values[colIndex.restingHR]) {
+        const hr = parseFloat(values[colIndex.restingHR]);
+        if (!isNaN(hr) && hr > 0) {
+          results.restingHRRecords.push({ date, value: hr });
+        }
+      }
+
+      if (colIndex.activeCalories >= 0 && values[colIndex.activeCalories]) {
+        const cal = parseFloat(values[colIndex.activeCalories]);
+        if (!isNaN(cal) && cal > 0) {
+          results.calorieRecords.push({ date, value: cal });
+        }
+      }
+    }
+
+    // Sort by date (newest first)
+    Object.keys(results).forEach(key => {
+      if (Array.isArray(results[key])) {
+        results[key].sort((a, b) => new Date(b.date) - new Date(a.date));
+      }
+    });
+
+    // Update stored data - Apple Health has PRIORITY
+    const data = readData();
+
+    // Update measurements with Apple Health priority
+    if (results.weightRecords.length > 0) {
+      data.measurements = data.measurements || { current: {}, starting: {} };
+      data.measurements.current.weight = results.weightRecords[0].value;
+      data.measurements.sources = data.measurements.sources || {};
+      data.measurements.sources.weight = 'Apple Health';
+    }
+
+    if (results.bodyFatRecords.length > 0) {
+      data.measurements = data.measurements || { current: {}, starting: {} };
+      data.measurements.current.bodyFat = results.bodyFatRecords[0].value;
+      data.measurements.sources = data.measurements.sources || {};
+      data.measurements.sources.bodyFat = 'Apple Health';
+    }
+
+    if (results.leanMassRecords.length > 0) {
+      data.measurements = data.measurements || { current: {}, starting: {} };
+      data.measurements.current.leanMass = results.leanMassRecords[0].value;
+      data.measurements.sources = data.measurements.sources || {};
+      data.measurements.sources.leanMass = 'Apple Health';
+    }
+
+    if (results.restingHRRecords.length > 0) {
+      data.appleHealth = data.appleHealth || {};
+      data.appleHealth.restingHeartRate = Math.round(
+        results.restingHRRecords.slice(0, 7).reduce((sum, r) => sum + r.value, 0) /
+        Math.min(results.restingHRRecords.length, 7)
+      );
+    }
+
+    data.lastSync = new Date().toISOString();
+
+    fs.unlinkSync(req.file.path);
+
+    if (writeData(data)) {
+      res.json({
+        success: true,
+        imported: {
+          weightRecords: results.weightRecords.length,
+          bodyFatRecords: results.bodyFatRecords.length,
+          leanMassRecords: results.leanMassRecords.length,
+          restingHRRecords: results.restingHRRecords.length,
+        },
+        current: {
+          weight: data.measurements?.current?.weight,
+          bodyFat: data.measurements?.current?.bodyFat,
+          leanMass: data.measurements?.current?.leanMass,
+          restingHR: data.appleHealth?.restingHeartRate
+        }
+      });
+    } else {
+      res.status(500).json({ error: 'Failed to save data' });
+    }
+
+  } catch (error) {
+    console.error('Apple Health CSV upload error:', error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({ error: error.message });
   }
 });
 

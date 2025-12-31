@@ -490,7 +490,7 @@ const ConditioningIcon = ({ type, size = 16, className = '' }) => {
   return <Icon size={size} className={className} />;
 };
 
-const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth, onExportJson, onExportCsv }) => {
+const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth, onUploadAppleHealthCSV, onExportJson, onExportCsv }) => {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
@@ -504,6 +504,7 @@ const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth,
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy Workouts (JSON/CSV)</span><input type="file" accept=".json,.csv" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-blue-400" /><span className="text-sm text-white">Hevy Measurements (CSV)</span><input type="file" accept=".csv" onChange={(e) => { onUploadHevyMeasurements(e); setIsOpen(false); }} className="hidden" /></label>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-pink-400" /><span className="text-sm text-white">Apple Health (XML)</span><input type="file" accept=".xml,.zip" onChange={(e) => { onUploadAppleHealth(e); setIsOpen(false); }} className="hidden" /></label>
+            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-rose-400" /><span className="text-sm text-white">Apple Health (CSV)</span><input type="file" accept=".csv" onChange={(e) => { onUploadAppleHealthCSV(e); setIsOpen(false); }} className="hidden" /></label>
           </div>
           <div className="p-2">
             <p className="text-xs text-gray-500 px-2 py-1">Export</p>
@@ -1436,6 +1437,24 @@ const App = () => {
     } catch { alert('Server error - ensure backend is running'); }
   };
 
+  const handleUploadAppleHealthCSV = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE_URL}/apple-health/csv/upload`, { method: 'POST', body: formData });
+      if (res.ok) {
+        const result = await res.json();
+        alert(`Apple Health CSV uploaded! Weight: ${result.current.weight}kg, Body Fat: ${result.current.bodyFat}%`);
+        handleRefresh();
+      } else {
+        const error = await res.json();
+        alert(error.error || 'Failed to upload Apple Health CSV');
+      }
+    } catch { alert('Server error - ensure backend is running'); }
+  };
+
   const handleExportJson = () => {
     if (!data) return;
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1500,7 +1519,7 @@ const App = () => {
               <button onClick={handleRefresh} disabled={loading} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50">
                 <RefreshCw size={18} className={`text-gray-400 ${loading ? 'animate-spin' : ''}`} />
               </button>
-              <MoreMenu onUploadHevy={handleUploadHevy} onUploadHevyMeasurements={handleUploadHevyMeasurements} onUploadAppleHealth={handleUploadAppleHealth} onExportJson={handleExportJson} onExportCsv={handleExportCsv} />
+              <MoreMenu onUploadHevy={handleUploadHevy} onUploadHevyMeasurements={handleUploadHevyMeasurements} onUploadAppleHealth={handleUploadAppleHealth} onUploadAppleHealthCSV={handleUploadAppleHealthCSV} onExportJson={handleExportJson} onExportCsv={handleExportCsv} />
             </div>
           </div>
         </div>

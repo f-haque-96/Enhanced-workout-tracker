@@ -19,12 +19,14 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
       weightRecords: [],
       bodyFatRecords: [],
       restingHRRecords: [],
+      leanMassRecords: [],
       stats: {
         linesProcessed: 0,
         workoutsFound: 0,
         weightRecordsFound: 0,
         bodyFatRecordsFound: 0,
-        restingHRRecordsFound: 0
+        restingHRRecordsFound: 0,
+        leanMassRecordsFound: 0
       }
     };
 
@@ -98,6 +100,17 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
           results.stats.restingHRRecordsFound++;
         }
       }
+
+      // ==========================================
+      // LEAN BODY MASS (single line)
+      // ==========================================
+      if (line.includes('HKQuantityTypeIdentifierLeanBodyMass') && line.includes('value=')) {
+        const record = parseHealthRecord(line, 'leanMass');
+        if (record) {
+          results.leanMassRecords.push(record);
+          results.stats.leanMassRecordsFound++;
+        }
+      }
     });
 
     rl.on('close', () => {
@@ -106,7 +119,8 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
       results.weightRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
       results.bodyFatRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
       results.restingHRRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
-      
+      results.leanMassRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+
       resolve(results);
     });
 
