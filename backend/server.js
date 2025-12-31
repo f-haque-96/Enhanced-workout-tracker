@@ -113,13 +113,19 @@ const transformWorkout = (workout) => {
       title: exercise.title,
       muscle_group: exercise.muscle_group || 'other',
       sets: (exercise.sets || []).map(set => {
-        // DEBUG: Log raw set data to see what Hevy provides
-        console.log('Raw Hevy set data:', JSON.stringify(set, null, 2));
+        // Map Hevy's 'type' field to our 'set_type'
+        // Hevy uses: "warmup", "normal", "failure"
+        let setType = 'working'; // default
+        if (set.type === 'warmup') {
+          setType = 'warmup';
+        } else if (set.type === 'failure' || set.rpe >= 10) {
+          setType = 'failure';
+        } else if (set.type === 'normal') {
+          setType = 'working';
+        }
 
         return {
-          // Use set_type from Hevy if provided, otherwise determine from RPE
-          // Default to 'working' if no RPE (many users don't track RPE for every set)
-          set_type: set.set_type || (set.rpe >= 10 ? 'failure' : 'working'),
+          set_type: setType,
           weight_kg: set.weight_kg,
           reps: set.reps,
           rpe: set.rpe,
