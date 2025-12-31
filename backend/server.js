@@ -251,10 +251,11 @@ app.get('/api/hevy/sync', async (req, res) => {
     let allWorkouts = [];
     let page = 1;
     let hasMore = true;
-    
-    while (hasMore && page <= 10) {
+
+    // Fetch all workouts (no page limit)
+    while (hasMore && page <= 100) { // Safety limit of 100 pages (1000 workouts)
       const response = await fetchHevy(`/workouts?page=${page}&pageSize=10`);
-      
+
       if (response.workouts && response.workouts.length > 0) {
         allWorkouts = [...allWorkouts, ...response.workouts];
         page++;
@@ -473,7 +474,8 @@ const autoSyncHevy = async () => {
     let page = 1;
     let hasMore = true;
     
-    while (hasMore && page <= 10) {
+    // Fetch all workouts (no page limit)
+    while (hasMore && page <= 100) { // Safety limit of 100 pages (1000 workouts)
       const response = await fetchHevy(`/workouts?page=${page}&pageSize=10`);
       if (response.workouts && response.workouts.length > 0) {
         allWorkouts = [...allWorkouts, ...response.workouts];
