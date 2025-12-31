@@ -662,10 +662,10 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       // DEBUG: Log first row parsing to check column mapping
       if (i === 1) {
         console.log('Parsed first row:', {
-          'shoulders (idx ' + colIdx.shoulders + ')': row.shoulders,
-          'chest (idx ' + colIdx.chest + ')': row.chest,
-          'leftBicep (idx ' + colIdx.leftBicep + ')': row.leftBicep,
-          'rightBicep (idx ' + colIdx.rightBicep + ')': row.rightBicep
+          [`shoulders (idx ${colIdx.shoulders})`]: row.shoulders,
+          [`chest (idx ${colIdx.chest})`]: row.chest,
+          [`leftBicep (idx ${colIdx.leftBicep})`]: row.leftBicep,
+          [`rightBicep (idx ${colIdx.rightBicep})`]: row.rightBicep
         });
       }
       row.abdomen = parseNum(colIdx.abdomen);
