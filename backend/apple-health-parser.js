@@ -183,8 +183,10 @@ function parseWorkoutXML(xml) {
       displayType = 'Rowing';
     }
 
-    // Extract calories - try main attribute first, then WorkoutStatistics
+    // Extract calories - try multiple patterns
     let calories = caloriesMatch ? parseFloat(caloriesMatch[1]) : 0;
+
+    // Try WorkoutStatistics with sum attribute
     if (calories === 0) {
       const statsCaloriesMatch = xml.match(/HKQuantityTypeIdentifierActiveEnergyBurned[^>]*sum="([^"]+)"/);
       if (statsCaloriesMatch) {
@@ -192,35 +194,65 @@ function parseWorkoutXML(xml) {
       }
     }
 
-    // Extract heart rate - try multiple sources
+    // Try WorkoutStatistics with quantity attribute
+    if (calories === 0) {
+      const quantityCaloriesMatch = xml.match(/HKQuantityTypeIdentifierActiveEnergyBurned[^>]*quantity="([^"]+)"/);
+      if (quantityCaloriesMatch) {
+        calories = parseFloat(quantityCaloriesMatch[1]);
+      }
+    }
+
+    // Try metadata value
+    if (calories === 0) {
+      const metaCaloriesMatch = xml.match(/HKActiveEnergyBurned[^>]*value="([^"]+)"/);
+      if (metaCaloriesMatch) {
+        calories = parseFloat(metaCaloriesMatch[1]);
+      }
+    }
+
+    // Extract heart rate - try multiple sources with comprehensive patterns
     let avgHeartRate = null;
     let maxHeartRate = null;
 
-    // Try HeartRateStatistics element
+    // Pattern 1: HeartRateStatistics element
     const hrStatsAvgMatch = xml.match(/HeartRateStatistics[^>]*average="([^"]+)"/);
     const hrStatsMaxMatch = xml.match(/HeartRateStatistics[^>]*maximum="([^"]+)"/);
+    if (hrStatsAvgMatch) avgHeartRate = Math.round(parseFloat(hrStatsAvgMatch[1]));
+    if (hrStatsMaxMatch) maxHeartRate = Math.round(parseFloat(hrStatsMaxMatch[1]));
 
-    if (hrStatsAvgMatch) avgHeartRate = parseInt(hrStatsAvgMatch[1]);
-    if (hrStatsMaxMatch) maxHeartRate = parseInt(hrStatsMaxMatch[1]);
-
-    // Try WorkoutStatistics for heart rate
+    // Pattern 2: WorkoutStatistics with average/maximum attributes
     if (!avgHeartRate) {
       const statsAvgHRMatch = xml.match(/HKQuantityTypeIdentifierHeartRate[^>]*average="([^"]+)"/);
-      if (statsAvgHRMatch) avgHeartRate = parseInt(statsAvgHRMatch[1]);
+      if (statsAvgHRMatch) avgHeartRate = Math.round(parseFloat(statsAvgHRMatch[1]));
     }
     if (!maxHeartRate) {
       const statsMaxHRMatch = xml.match(/HKQuantityTypeIdentifierHeartRate[^>]*maximum="([^"]+)"/);
-      if (statsMaxHRMatch) maxHeartRate = parseInt(statsMaxHRMatch[1]);
+      if (statsMaxHRMatch) maxHeartRate = Math.round(parseFloat(statsMaxHRMatch[1]));
     }
 
-    // Try metadata as fallback
+    // Pattern 3: Metadata elements
     if (!avgHeartRate) {
       const metaAvgHRMatch = xml.match(/HKAverageHeartRate[^>]*value="([^"]+)"/);
-      if (metaAvgHRMatch) avgHeartRate = parseInt(metaAvgHRMatch[1]);
+      if (metaAvgHRMatch) avgHeartRate = Math.round(parseFloat(metaAvgHRMatch[1]));
     }
     if (!maxHeartRate) {
       const metaMaxHRMatch = xml.match(/HKMaximumHeartRate[^>]*value="([^"]+)"/);
-      if (metaMaxHRMatch) maxHeartRate = parseInt(metaMaxHRMatch[1]);
+      if (metaMaxHRMatch) maxHeartRate = Math.round(parseFloat(metaMaxHRMatch[1]));
+    }
+
+    // Pattern 4: WorkoutEvent with heart rate data
+    if (!avgHeartRate) {
+      const eventAvgMatch = xml.match(/HeartRate[^>]*average[^>]*value="([^"]+)"/);
+      if (eventAvgMatch) avgHeartRate = Math.round(parseFloat(eventAvgMatch[1]));
+    }
+    if (!maxHeartRate) {
+      const eventMaxMatch = xml.match(/HeartRate[^>]*max[^>]*value="([^"]+)"/);
+      if (eventMaxMatch) maxHeartRate = Math.round(parseFloat(eventMaxMatch[1]));
+    }
+
+    // Debug logging for conditioning workouts with missing data
+    if (category !== 'strength' && category !== 'other' && (!avgHeartRate || !calories)) {
+      console.log(`⚠️  ${displayType} on ${startMatch[1].split('T')[0]}: HR=${avgHeartRate || 'missing'}, Cal=${calories || 'missing'}`);
     }
 
     return {
