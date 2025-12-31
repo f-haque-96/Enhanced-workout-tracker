@@ -1136,9 +1136,6 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                 return true;
               });
 
-              // Skip this workout if no exercises remain after filtering (all were warmup-only)
-              if (catEx.length === 0) return null;
-
               const stats = catEx.reduce((a, e) => { e.sets.forEach(s => { if (s.set_type === 'warmup') a.warm++; else if (s.set_type === 'failure') a.fail++; else a.work++; }); return a; }, { warm: 0, work: 0, fail: 0 });
               const byMuscle = catEx.reduce((a, e) => { const { muscle } = categorizeExercise(e.title); if (!a[muscle]) a[muscle] = []; a[muscle].push(e); return a; }, {});
 

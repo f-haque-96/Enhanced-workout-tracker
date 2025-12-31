@@ -120,7 +120,9 @@ const transformWorkout = (workout) => {
       title: exercise.title,
       muscle_group: exercise.muscle_group || 'other',
       sets: (exercise.sets || []).map(set => ({
-        set_type: set.set_type || (set.rpe >= 10 ? 'failure' : set.rpe === null ? 'warmup' : 'working'),
+        // Use set_type from Hevy if provided, otherwise determine from RPE
+        // Default to 'working' if no RPE (many users don't track RPE for every set)
+        set_type: set.set_type || (set.rpe >= 10 ? 'failure' : 'working'),
         weight_kg: set.weight_kg,
         reps: set.reps,
         rpe: set.rpe,
