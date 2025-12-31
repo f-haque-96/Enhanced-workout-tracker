@@ -41,14 +41,15 @@ if (!fs.existsSync(DATA_FILE)) {
     workouts: [],
     conditioning: [],
     measurements: {
-      current: { weight: 82, bodyFat: 14, chest: 104, waist: 82, biceps: 38, thighs: 58 },
-      starting: { weight: 78, bodyFat: 18, chest: 98, waist: 85, biceps: 35, thighs: 54 }
+      current: { weight: null, bodyFat: null, chest: null, waist: null, biceps: null, thighs: null },
+      starting: { weight: null, bodyFat: null, chest: null, waist: null, biceps: null, thighs: null },
+      height: null // Height in cm for BMI calculation
     },
     appleHealth: {
-      restingHeartRate: 62,
-      avgSteps: 8432,
-      avgActiveCalories: 520,
-      sleepAvg: 7.2
+      restingHeartRate: null,
+      avgSteps: null,
+      avgActiveCalories: null,
+      sleepAvg: null
     },
     lastSync: null,
     lastWebhook: null
@@ -347,6 +348,108 @@ app.post('/api/hevy/upload', upload.single('file'), async (req, res) => {
   }
 });
 
+// Upload Hevy measurements CSV
+app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    const fileName = req.file.originalname || '';
+
+    if (!fileName.toLowerCase().endsWith('.csv')) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Please upload a CSV file' });
+    }
+
+    console.log('Processing Hevy measurements CSV...');
+
+    // Parse CSV - simple parser for Hevy measurements format
+    const lines = fileContent.split('\n').filter(line => line.trim());
+    if (lines.length < 2) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'CSV file is empty or invalid' });
+    }
+
+    // Parse header to find column indices
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const dateIdx = headers.findIndex(h => h.includes('date') || h.includes('time'));
+    const weightIdx = headers.findIndex(h => h.includes('weight') || h.includes('body weight'));
+    const bodyFatIdx = headers.findIndex(h => h.includes('body fat') || h.includes('bodyfat'));
+
+    const measurements = [];
+
+    // Parse data rows
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim());
+      const measurement = {
+        date: dateIdx >= 0 ? values[dateIdx] : null,
+        weight: weightIdx >= 0 ? parseFloat(values[weightIdx]) : null,
+        bodyFat: bodyFatIdx >= 0 ? parseFloat(values[bodyFatIdx]) : null
+      };
+
+      if (measurement.date && (measurement.weight || measurement.bodyFat)) {
+        measurements.push(measurement);
+      }
+    }
+
+    if (measurements.length === 0) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'No valid measurement data found in CSV' });
+    }
+
+    // Sort by date
+    measurements.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const data = readData();
+
+    // Get starting (oldest) and current (newest) measurements
+    const starting = measurements[0];
+    const current = measurements[measurements.length - 1];
+
+    if (starting.weight) {
+      data.measurements.starting.weight = Math.round(starting.weight * 10) / 10;
+    }
+    if (current.weight) {
+      data.measurements.current.weight = Math.round(current.weight * 10) / 10;
+    }
+
+    if (starting.bodyFat) {
+      data.measurements.starting.bodyFat = Math.round(starting.bodyFat * 10) / 10;
+    }
+    if (current.bodyFat) {
+      data.measurements.current.bodyFat = Math.round(current.bodyFat * 10) / 10;
+    }
+
+    data.lastSync = new Date().toISOString();
+
+    fs.unlinkSync(req.file.path);
+
+    if (writeData(data)) {
+      res.json({
+        success: true,
+        measurementsCount: measurements.length,
+        starting: {
+          weight: data.measurements.starting.weight,
+          bodyFat: data.measurements.starting.bodyFat
+        },
+        current: {
+          weight: data.measurements.current.weight,
+          bodyFat: data.measurements.current.bodyFat
+        }
+      });
+    } else {
+      res.status(500).json({ error: 'Failed to save data' });
+    }
+
+  } catch (error) {
+    console.error('Hevy measurements upload error:', error);
+    if (req.file) fs.unlinkSync(req.file.path);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============================================
 // APPLE HEALTH ROUTES
 // ============================================
@@ -429,20 +532,33 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
     });
     
     let restingHRSum = 0, restingHRCount = 0;
-    
+    const weightData = [];
+    const bodyFatData = [];
+    let heightValue = null;
+
     records.forEach(record => {
       const attrs = record.$ || {};
       const type = attrs.type || '';
       const value = parseFloat(attrs.value) || 0;
-      
+      const date = attrs.startDate || '';
+
       if (type === 'HKQuantityTypeIdentifierRestingHeartRate') {
         restingHRSum += value;
         restingHRCount++;
+      } else if (type === 'HKQuantityTypeIdentifierBodyMass') {
+        // Weight in kg
+        weightData.push({ date, value });
+      } else if (type === 'HKQuantityTypeIdentifierBodyFatPercentage') {
+        // Body fat as percentage (0-100)
+        bodyFatData.push({ date, value: value * 100 });
+      } else if (type === 'HKQuantityTypeIdentifierHeight') {
+        // Height in meters - use the most recent value
+        heightValue = value * 100; // Convert to cm
       }
     });
     
     const data = readData();
-    
+
     data.workouts = data.workouts.map(workout => {
       const dateKey = workout.start_time.split('T')[0];
       if (strengthWorkoutData[dateKey]) {
@@ -450,11 +566,36 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
       }
       return workout;
     });
-    
+
     data.conditioning = conditioningSessions.sort((a, b) => new Date(b.date) - new Date(a.date));
-    
+
     if (restingHRCount > 0) {
       data.appleHealth.restingHeartRate = Math.round(restingHRSum / restingHRCount);
+    }
+
+    // Process weight data
+    if (weightData.length > 0) {
+      weightData.sort((a, b) => new Date(a.date) - new Date(b.date));
+      const startingWeight = weightData[0].value;
+      const currentWeight = weightData[weightData.length - 1].value;
+
+      data.measurements.starting.weight = Math.round(startingWeight * 10) / 10;
+      data.measurements.current.weight = Math.round(currentWeight * 10) / 10;
+    }
+
+    // Process body fat data
+    if (bodyFatData.length > 0) {
+      bodyFatData.sort((a, b) => new Date(a.date) - new Date(b.date));
+      const startingBodyFat = bodyFatData[0].value;
+      const currentBodyFat = bodyFatData[bodyFatData.length - 1].value;
+
+      data.measurements.starting.bodyFat = Math.round(startingBodyFat * 10) / 10;
+      data.measurements.current.bodyFat = Math.round(currentBodyFat * 10) / 10;
+    }
+
+    // Store height if found
+    if (heightValue) {
+      data.measurements.height = Math.round(heightValue * 10) / 10;
     }
     
     data.lastSync = new Date().toISOString();

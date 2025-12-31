@@ -364,8 +364,8 @@ const generateMockData = () => {
   return {
     workouts: generateWorkouts(),
     conditioning: generateConditioning(),
-    measurements: { current: { weight: 82, bodyFat: 14, chest: 104, waist: 82, biceps: 38, thighs: 58 }, starting: { weight: 78, bodyFat: 18, chest: 98, waist: 85, biceps: 35, thighs: 54 } },
-    appleHealth: { restingHeartRate: 62, avgSteps: 8432, avgActiveCalories: 520, sleepAvg: 7.2 }
+    measurements: { current: { weight: null, bodyFat: null, chest: null, waist: null, biceps: null, thighs: null }, starting: { weight: null, bodyFat: null, chest: null, waist: null, biceps: null, thighs: null }, height: null },
+    appleHealth: { restingHeartRate: null, avgSteps: null, avgActiveCalories: null, sleepAvg: null }
   };
 };
 
@@ -426,7 +426,7 @@ const ConditioningIcon = ({ type, size = 16, className = '' }) => {
   return <Icon size={size} className={className} />;
 };
 
-const MoreMenu = ({ onUploadHevy, onUploadAppleHealth, onExportJson, onExportCsv }) => {
+const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth, onExportJson, onExportCsv }) => {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
@@ -437,7 +437,8 @@ const MoreMenu = ({ onUploadHevy, onUploadAppleHealth, onExportJson, onExportCsv
         <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-slate-900 border border-white/10 shadow-xl z-[9999]">
           <div className="p-2 border-b border-white/10">
             <p className="text-xs text-gray-500 px-2 py-1">Upload</p>
-            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy (JSON)</span><input type="file" accept=".json" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
+            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy Workouts (JSON)</span><input type="file" accept=".json" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
+            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-blue-400" /><span className="text-sm text-white">Hevy Measurements (CSV)</span><input type="file" accept=".csv" onChange={(e) => { onUploadHevyMeasurements(e); setIsOpen(false); }} className="hidden" /></label>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-pink-400" /><span className="text-sm text-white">Apple Health (XML)</span><input type="file" accept=".xml,.zip" onChange={(e) => { onUploadAppleHealth(e); setIsOpen(false); }} className="hidden" /></label>
           </div>
           <div className="p-2">
@@ -534,45 +535,89 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
 // MEASUREMENTS CARD
 // ============================================
 const MeasurementsCard = ({ measurements }) => {
-  const { current, starting } = measurements;
-  const bmi = (current.weight / Math.pow(1.78, 2)).toFixed(1);
-  const changes = { weight: ((current.weight - starting.weight) / starting.weight * 100).toFixed(1), bodyFat: (starting.bodyFat - current.bodyFat).toFixed(1) };
+  const { current, starting, height } = measurements;
+
+  // Calculate BMI if we have weight and height
+  const bmi = (current.weight && height) ? (current.weight / Math.pow(height / 100, 2)).toFixed(1) : null;
+  const bmiCategory = bmi ? (bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal' : bmi < 30 ? 'Overweight' : 'Obese') : null;
+  const bmiColor = bmi ? (bmi < 18.5 ? 'yellow' : bmi < 25 ? 'green' : bmi < 30 ? 'orange' : 'red') : 'gray';
+
+  // Calculate changes
+  const weightChange = (current.weight && starting.weight) ? ((current.weight - starting.weight) / starting.weight * 100).toFixed(1) : null;
+  const bodyFatChange = (current.bodyFat && starting.bodyFat) ? (starting.bodyFat - current.bodyFat).toFixed(1) : null;
+
+  const hasData = current.weight || current.bodyFat || current.chest || current.biceps;
+
   return (
     <div className="card h-full">
       <div className="flex items-center gap-2 mb-4"><Scale className="text-blue-400" size={20} /><h3 className="text-lg font-semibold text-white">Body Composition</h3></div>
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <Tooltip content={<div><p className="font-medium">Weight</p><p className="text-gray-400">Started: {starting.weight}kg → Now: {current.weight}kg</p></div>}>
-          <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-500/5 border border-blue-500/20 cursor-help">
-            <p className="text-xs text-gray-400 mb-1">Weight</p>
-            <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-white">{current.weight}</span><span className="text-sm text-gray-400">kg</span></div>
-            <p className="text-xs mt-1"><span className={changes.weight >= 0 ? 'text-green-400' : 'text-red-400'}>{changes.weight > 0 ? '+' : ''}{changes.weight}%</span></p>
+
+      {!hasData ? (
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <Upload className="text-gray-600 mb-3" size={32} />
+          <p className="text-gray-400 text-sm mb-1">No measurement data</p>
+          <p className="text-gray-500 text-xs">Upload Hevy Measurements (CSV) or Apple Health (XML) to see your body composition</p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <Tooltip content={current.weight && starting.weight ? <div><p className="font-medium">Weight</p><p className="text-gray-400">Started: {starting.weight}kg → Now: {current.weight}kg</p></div> : 'No weight data'}>
+              <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-500/5 border border-blue-500/20 cursor-help">
+                <p className="text-xs text-gray-400 mb-1">Weight</p>
+                {current.weight ? (
+                  <>
+                    <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-white">{current.weight}</span><span className="text-sm text-gray-400">kg</span></div>
+                    {weightChange && <p className="text-xs mt-1"><span className={weightChange >= 0 ? 'text-green-400' : 'text-red-400'}>{weightChange > 0 ? '+' : ''}{weightChange}%</span></p>}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500">No data</p>
+                )}
+              </div>
+            </Tooltip>
+            <Tooltip content={current.bodyFat && starting.bodyFat ? <div><p className="font-medium">Body Fat</p><p className="text-gray-400">Started: {starting.bodyFat}% → Now: {current.bodyFat}%</p></div> : 'No body fat data'}>
+              <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-500/5 border border-purple-500/20 cursor-help">
+                <p className="text-xs text-gray-400 mb-1">Body Fat</p>
+                {current.bodyFat ? (
+                  <>
+                    <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-white">{current.bodyFat}</span><span className="text-sm text-gray-400">%</span></div>
+                    {bodyFatChange && <p className="text-xs mt-1"><span className="text-green-400">-{bodyFatChange}%</span></p>}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500">No data</p>
+                )}
+              </div>
+            </Tooltip>
           </div>
-        </Tooltip>
-        <Tooltip content={<div><p className="font-medium">Body Fat</p><p className="text-gray-400">Started: {starting.bodyFat}% → Now: {current.bodyFat}%</p></div>}>
-          <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-500/5 border border-purple-500/20 cursor-help">
-            <p className="text-xs text-gray-400 mb-1">Body Fat</p>
-            <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-white">{current.bodyFat}</span><span className="text-sm text-gray-400">%</span></div>
-            <p className="text-xs mt-1"><span className="text-green-400">-{changes.bodyFat}%</span></p>
-          </div>
-        </Tooltip>
-      </div>
-      <div className="p-3 rounded-xl bg-white/5 border border-white/10">
-        <div className="flex items-center justify-between"><span className="text-sm text-gray-400">BMI</span><span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">Normal</span></div>
-        <span className="text-2xl font-bold text-white">{bmi}</span>
-      </div>
-      <div className="mt-3 space-y-1.5">
-        {[{ label: 'Chest', cur: current.chest, start: starting.chest }, { label: 'Biceps', cur: current.biceps, start: starting.biceps }].map(m => {
-          const curInches = (m.cur / 2.54).toFixed(1);
-          const startInches = (m.start / 2.54).toFixed(1);
-          const diffInches = (curInches - startInches).toFixed(1);
-          return (
-            <div key={m.label} className="flex items-center justify-between py-1 text-sm">
-              <span className="text-gray-400">{m.label}</span>
-              <div className="flex items-center gap-2"><span className="text-white">{curInches}"</span><span className={`text-xs ${m.cur >= m.start ? 'text-green-400' : 'text-red-400'}`}>{diffInches > 0 ? '+' : ''}{diffInches}</span></div>
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-400">BMI</span>
+              {bmiCategory && <span className={`text-xs px-2 py-0.5 rounded-full bg-${bmiColor}-500/20 text-${bmiColor}-400`}>{bmiCategory}</span>}
             </div>
-          );
-        })}
-      </div>
+            {bmi ? (
+              <span className="text-2xl font-bold text-white">{bmi}</span>
+            ) : (
+              <p className="text-sm text-gray-500">No data</p>
+            )}
+          </div>
+          <div className="mt-3 space-y-1.5">
+            {[{ label: 'Chest', cur: current.chest, start: starting.chest }, { label: 'Biceps', cur: current.biceps, start: starting.biceps }].map(m => {
+              if (!m.cur) return null;
+              const curInches = (m.cur / 2.54).toFixed(1);
+              const startInches = m.start ? (m.start / 2.54).toFixed(1) : null;
+              const diffInches = startInches ? (curInches - startInches).toFixed(1) : null;
+              return (
+                <div key={m.label} className="flex items-center justify-between py-1 text-sm">
+                  <span className="text-gray-400">{m.label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-white">{curInches}"</span>
+                    {diffInches && <span className={`text-xs ${m.cur >= m.start ? 'text-green-400' : 'text-red-400'}`}>{diffInches > 0 ? '+' : ''}{diffInches}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1269,11 +1314,35 @@ const App = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      const json = JSON.parse(text);
-      console.log('Hevy data:', json);
-      alert('Hevy data uploaded! (Sets, reps, weights from Hevy)');
-    } catch { alert('Failed to parse Hevy JSON'); }
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE_URL}/hevy/upload`, { method: 'POST', body: formData });
+      if (res.ok) {
+        alert('Hevy workouts uploaded! (Sets, reps, weights)');
+        handleRefresh();
+      } else {
+        const error = await res.json();
+        alert(error.error || 'Failed to upload Hevy data');
+      }
+    } catch { alert('Server error - ensure backend is running'); }
+  };
+
+  const handleUploadHevyMeasurements = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE_URL}/hevy/measurements/upload`, { method: 'POST', body: formData });
+      if (res.ok) {
+        const result = await res.json();
+        alert(`Hevy measurements uploaded! ${result.measurementsCount} entries processed.`);
+        handleRefresh();
+      } else {
+        const error = await res.json();
+        alert(error.error || 'Failed to upload measurements');
+      }
+    } catch { alert('Server error - ensure backend is running'); }
   };
 
   const handleUploadAppleHealth = async (e) => {
@@ -1352,7 +1421,7 @@ const App = () => {
               <button onClick={handleRefresh} disabled={loading} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50">
                 <RefreshCw size={18} className={`text-gray-400 ${loading ? 'animate-spin' : ''}`} />
               </button>
-              <MoreMenu onUploadHevy={handleUploadHevy} onUploadAppleHealth={handleUploadAppleHealth} onExportJson={handleExportJson} onExportCsv={handleExportCsv} />
+              <MoreMenu onUploadHevy={handleUploadHevy} onUploadHevyMeasurements={handleUploadHevyMeasurements} onUploadAppleHealth={handleUploadAppleHealth} onExportJson={handleExportJson} onExportCsv={handleExportCsv} />
             </div>
           </div>
         </div>
