@@ -1,349 +1,414 @@
-# HIT Tracker Pro - Comprehensive Bug Fixes
+## DEFINITIVE FIX: Make Data Parsing Robust and Defensive
 
-## OVERVIEW
-Fix 3 critical issues:
-1. Apple Health 150MB XML causing 502 crashes
-2. Hevy Measurements CSV parsing failing  
-3. Tooltip appearing behind adjacent cards
+We've identified the root causes. Now let's fix them permanently with robust, defensive code that handles ANY data format.
 
-Pi5: pi@192.168.1.73
-Project: ~/hit-tracker-pro
-GitHub: https://github.com/f-haque-96/Enhanced-workout-tracker
+### PRINCIPLE: Normalize ALL data on READ, not just on WRITE
+
+Instead of hoping the backend saves data correctly, the frontend should normalize data when reading it. This makes the system resilient to format changes.
 
 ---
 
-## FIX 1: Apple Health Large File Parser (CRITICAL)
+## FIX 1: Create Data Normalization Layer (src/App.jsx)
 
-The current XML parser loads the entire 150MB file into memory, crashing Node.js.
-
-### Solution: Create a streaming line-by-line parser
-
-Create a new file `backend/apple-health-parser.js`:
-
+Add this near the top of App.jsx after the imports:
 ```javascript
 // ============================================
-// APPLE HEALTH LARGE FILE PARSER
-// Extracts only needed data using streaming/regex
-// Handles 150MB+ files without crashing
+// DATA NORMALIZATION - Handles any format
 // ============================================
-
-const fs = require('fs');
-const readline = require('readline');
 
 /**
- * Parse Apple Health export.xml file efficiently
- * Uses line-by-line reading + regex extraction
- * Memory efficient - can handle 150MB+ files
+ * Normalize measurements data from any source
+ * Handles: Hevy CSV, Apple Health, manual entry
  */
-async function parseAppleHealthExport(filePath, progressCallback = null) {
-  return new Promise((resolve, reject) => {
-    const results = {
-      workouts: [],
-      weightRecords: [],
-      bodyFatRecords: [],
-      restingHRRecords: [],
-      stats: {
-        linesProcessed: 0,
-        workoutsFound: 0,
-        weightRecordsFound: 0,
-        bodyFatRecordsFound: 0,
-        restingHRRecordsFound: 0
-      }
-    };
-
-    const fileStream = fs.createReadStream(filePath, { encoding: 'utf8', highWaterMark: 64 * 1024 });
-    const rl = readline.createInterface({
-      input: fileStream,
-      crlfDelay: Infinity
-    });
-
-    let workoutBuffer = '';
-    let insideWorkout = false;
-
-    rl.on('line', (line) => {
-      results.stats.linesProcessed++;
-      
-      if (progressCallback && results.stats.linesProcessed % 50000 === 0) {
-        progressCallback(results.stats.linesProcessed);
-      }
-
-      // WORKOUT PARSING (can span multiple lines)
-      if (line.includes('<Workout ')) {
-        insideWorkout = true;
-        workoutBuffer = line;
-      } else if (insideWorkout) {
-        workoutBuffer += ' ' + line.trim();
-        if (line.includes('</Workout>') || (workoutBuffer.includes('<Workout ') && line.trim().endsWith('/>'))) {
-          const workout = parseWorkoutXML(workoutBuffer);
-          if (workout) {
-            results.workouts.push(workout);
-            results.stats.workoutsFound++;
-          }
-          insideWorkout = false;
-          workoutBuffer = '';
-        }
-        // Prevent buffer from growing too large
-        if (workoutBuffer.length > 50000) {
-          insideWorkout = false;
-          workoutBuffer = '';
-        }
-      }
-
-      // WEIGHT RECORDS (single line)
-      if (line.includes('HKQuantityTypeIdentifierBodyMass') && line.includes('value=')) {
-        const record = parseHealthRecord(line, 'weight');
-        if (record) {
-          results.weightRecords.push(record);
-          results.stats.weightRecordsFound++;
-        }
-      }
-
-      // BODY FAT RECORDS (single line)
-      if (line.includes('HKQuantityTypeIdentifierBodyFatPercentage') && line.includes('value=')) {
-        const record = parseHealthRecord(line, 'bodyFat');
-        if (record) {
-          results.bodyFatRecords.push(record);
-          results.stats.bodyFatRecordsFound++;
-        }
-      }
-
-      // RESTING HEART RATE (single line)
-      if (line.includes('HKQuantityTypeIdentifierRestingHeartRate') && line.includes('value=')) {
-        const record = parseHealthRecord(line, 'restingHR');
-        if (record) {
-          results.restingHRRecords.push(record);
-          results.stats.restingHRRecordsFound++;
-        }
-      }
-    });
-
-    rl.on('close', () => {
-      // Sort all records by date (newest first)
-      results.workouts.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
-      results.weightRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
-      results.bodyFatRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
-      results.restingHRRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
-      
-      console.log(`[Apple Health Parser] Complete:`, results.stats);
-      resolve(results);
-    });
-
-    rl.on('error', reject);
-    fileStream.on('error', reject);
-  });
-}
-
-function parseWorkoutXML(xml) {
-  try {
-    const typeMatch = xml.match(/workoutActivityType="([^"]+)"/);
-    const startMatch = xml.match(/startDate="([^"]+)"/);
-    const endMatch = xml.match(/endDate="([^"]+)"/);
-    const durationMatch = xml.match(/duration="([^"]+)"/);
-    const caloriesMatch = xml.match(/totalEnergyBurned="([^"]+)"/);
-    const distanceMatch = xml.match(/totalDistance="([^"]+)"/);
-
-    if (!typeMatch || !startMatch) return null;
-
-    const workoutType = typeMatch[1];
-    
-    let category = 'other';
-    let displayType = 'Other';
-    
-    if (workoutType.includes('TraditionalStrengthTraining') || workoutType.includes('FunctionalStrengthTraining')) {
-      category = 'strength';
-      displayType = 'Strength Training';
-    } else if (workoutType.includes('Walking')) {
-      category = 'walking';
-      displayType = 'Walking';
-    } else if (workoutType.includes('Running')) {
-      category = 'running';
-      displayType = 'Running';
-    } else if (workoutType.includes('Cycling')) {
-      category = 'cycling';
-      displayType = 'Cycling';
-    } else if (workoutType.includes('Swimming')) {
-      category = 'swimming';
-      displayType = 'Swimming';
-    } else if (workoutType.includes('HIIT') || workoutType.includes('HighIntensityIntervalTraining')) {
-      category = 'hiit';
-      displayType = 'HIIT';
-    }
-
-    const avgHRMatch = xml.match(/HKAverageHeartRate[^>]*value="([^"]+)"/);
-    const maxHRMatch = xml.match(/HKMaximumHeartRate[^>]*value="([^"]+)"/);
-
+const normalizeMeasurements = (raw) => {
+  if (!raw) return { current: {}, starting: {}, history: [] };
+  
+  const normalize = (obj) => {
+    if (!obj) return {};
     return {
-      type: workoutType,
-      category,
-      displayType,
-      startDate: startMatch[1],
-      endDate: endMatch ? endMatch[1] : null,
-      duration: durationMatch ? parseFloat(durationMatch[1]) * 60 : 0,
-      calories: caloriesMatch ? parseFloat(caloriesMatch[1]) : 0,
-      distance: distanceMatch ? parseFloat(distanceMatch[1]) : 0,
-      avgHeartRate: avgHRMatch ? parseInt(avgHRMatch[1]) : null,
-      maxHeartRate: maxHRMatch ? parseInt(maxHRMatch[1]) : null
+      weight: obj.weight ?? obj.weight_kg ?? obj.bodyMass ?? null,
+      bodyFat: obj.bodyFat ?? obj.fat_percent ?? obj.body_fat ?? obj.fatPercent ?? null,
+      leanMass: obj.leanMass ?? obj.lean_mass ?? obj.leanBodyMass ?? null,
+      // Body measurements - check multiple possible field names
+      neck: obj.neck ?? obj.neck_in ?? obj.neckIn ?? null,
+      shoulders: obj.shoulders ?? obj.shoulder_in ?? obj.shoulderIn ?? null,
+      chest: obj.chest ?? obj.chest_in ?? obj.chestIn ?? null,
+      // Biceps - prefer individual, fallback to combined
+      leftBicep: obj.leftBicep ?? obj.left_bicep_in ?? obj.left_bicep ?? null,
+      rightBicep: obj.rightBicep ?? obj.right_bicep_in ?? obj.right_bicep ?? null,
+      biceps: obj.biceps ?? obj.leftBicep ?? obj.rightBicep ?? obj.left_bicep_in ?? obj.right_bicep_in ?? obj.left_bicep ?? obj.right_bicep ?? null,
+      // Forearms
+      leftForearm: obj.leftForearm ?? obj.left_forearm_in ?? obj.left_forearm ?? null,
+      rightForearm: obj.rightForearm ?? obj.right_forearm_in ?? obj.right_forearm ?? null,
+      // Core
+      abdomen: obj.abdomen ?? obj.abdomen_in ?? null,
+      waist: obj.waist ?? obj.waist_in ?? obj.waistIn ?? null,
+      hips: obj.hips ?? obj.hips_in ?? obj.hipsIn ?? null,
+      // Legs
+      leftThigh: obj.leftThigh ?? obj.left_thigh_in ?? obj.left_thigh ?? null,
+      rightThigh: obj.rightThigh ?? obj.right_thigh_in ?? obj.right_thigh ?? null,
+      thighs: obj.thighs ?? obj.leftThigh ?? obj.rightThigh ?? obj.left_thigh_in ?? obj.right_thigh_in ?? obj.left_thigh ?? obj.right_thigh ?? null,
+      leftCalf: obj.leftCalf ?? obj.left_calf_in ?? obj.left_calf ?? null,
+      rightCalf: obj.rightCalf ?? obj.right_calf_in ?? obj.right_calf ?? null,
     };
-  } catch (e) {
-    return null;
-  }
-}
+  };
+  
+  return {
+    current: normalize(raw.current),
+    starting: normalize(raw.starting),
+    history: raw.history || [],
+    sources: raw.sources || {}
+  };
+};
 
-function parseHealthRecord(line, type) {
-  try {
-    const valueMatch = line.match(/value="([^"]+)"/);
-    const dateMatch = line.match(/startDate="([^"]+)"/);
+/**
+ * Normalize a single conditioning session
+ * Handles: Apple Health XML, Apple Health CSV, any format
+ */
+const normalizeConditioningSession = (session) => {
+  if (!session) return null;
+  
+  return {
+    id: session.id ?? `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    type: session.type ?? session.workoutType ?? session.activityType ?? 'Other',
+    category: session.category ?? 'other',
+    date: session.date ?? session.startDate ?? session.start_time ?? null,
+    source: session.source ?? 'Unknown',
+    // Duration - handle seconds or minutes
+    duration: session.duration ?? session.durationSeconds ?? (session.durationMinutes ? session.durationMinutes * 60 : 0),
+    // Calories - check ALL possible field names
+    activeCalories: session.activeCalories ?? session.calories ?? session.totalCalories ?? session.energyBurned ?? session.active_calories ?? 0,
+    // Heart rate - check ALL possible field names
+    avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? session.hr_avg ?? session.heartRateAvg ?? session.avg_hr ?? 0,
+    maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? session.hr_max ?? session.heartRateMax ?? session.max_hr ?? 0,
+    // Distance
+    distance: session.distance ?? session.totalDistance ?? session.distanceKm ?? 0,
+    pace: session.pace ?? session.avgPace ?? null,
+    hrZones: session.hrZones ?? { zone1: 20, zone2: 30, zone3: 30, zone4: 15, zone5: 5 }
+  };
+};
 
-    if (!valueMatch || !dateMatch) return null;
+/**
+ * Normalize conditioning array
+ */
+const normalizeConditioning = (raw) => {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw.map(normalizeConditioningSession).filter(s => s !== null);
+};
 
-    let value = parseFloat(valueMatch[1]);
-    
-    // Convert body fat from decimal to percentage if needed
-    if (type === 'bodyFat' && value < 1) {
-      value = value * 100;
-    }
+/**
+ * Normalize workout with Apple Health data
+ */
+const normalizeWorkout = (workout) => {
+  if (!workout) return null;
+  
+  // Normalize Apple Health data if present
+  const appleHealth = workout.appleHealth ? {
+    duration: workout.appleHealth.duration ?? workout.appleHealth.durationSeconds ?? 0,
+    activeCalories: workout.appleHealth.activeCalories ?? workout.appleHealth.calories ?? workout.appleHealth.totalCalories ?? 0,
+    avgHeartRate: workout.appleHealth.avgHeartRate ?? workout.appleHealth.averageHeartRate ?? workout.appleHealth.hr_avg ?? 0,
+    maxHeartRate: workout.appleHealth.maxHeartRate ?? workout.appleHealth.maximumHeartRate ?? workout.appleHealth.hr_max ?? 0,
+  } : null;
+  
+  return {
+    ...workout,
+    appleHealth
+  };
+};
 
-    return { value, date: dateMatch[1] };
-  } catch (e) {
-    return null;
-  }
-}
+/**
+ * Normalize all workouts
+ */
+const normalizeWorkouts = (raw) => {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw.map(normalizeWorkout).filter(w => w !== null);
+};
 
-module.exports = { parseAppleHealthExport };
+/**
+ * Normalize Apple Health stats
+ */
+const normalizeAppleHealth = (raw) => {
+  if (!raw) return { restingHeartRate: null, avgSteps: null, avgActiveCalories: null, sleepAvg: null };
+  return {
+    restingHeartRate: raw.restingHeartRate ?? raw.resting_hr ?? raw.restingHR ?? null,
+    avgSteps: raw.avgSteps ?? raw.steps ?? null,
+    avgActiveCalories: raw.avgActiveCalories ?? raw.activeCalories ?? null,
+    sleepAvg: raw.sleepAvg ?? raw.sleep ?? null,
+  };
+};
+
+/**
+ * Master normalize function - normalizes entire API response
+ */
+const normalizeApiData = (raw) => {
+  if (!raw) return null;
+  return {
+    workouts: normalizeWorkouts(raw.workouts),
+    conditioning: normalizeConditioning(raw.conditioning),
+    measurements: normalizeMeasurements(raw.measurements),
+    appleHealth: normalizeAppleHealth(raw.appleHealth),
+    lastSync: raw.lastSync,
+    lastWebhook: raw.lastWebhook,
+  };
+};
 ```
 
-### Update the Apple Health upload endpoint in `backend/server.js`:
+---
 
-Find the `/api/apple-health/upload` endpoint and REPLACE it with:
+## FIX 2: Use Normalization When Loading Data
 
+Find the useEffect that loads data and update it:
 ```javascript
-// At the top of server.js, add:
-const { parseAppleHealthExport } = require('./apple-health-parser');
-
-// Replace the entire /api/apple-health/upload endpoint:
-app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => {
-  const startTime = Date.now();
+useEffect(() => {
+  const loadData = async () => {
+    setLoading(true);
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/data`);
+      if (res.ok) {
+        const apiData = await res.json();
+        // NORMALIZE the data before using it
+        const normalizedData = normalizeApiData(apiData);
+        if (normalizedData && (normalizedData.workouts.length > 0 || normalizedData.conditioning.length > 0)) {
+          setData(normalizedData);
+          console.log('✅ Loaded and normalized API data:', normalizedData);
+          setLastUpdated(new Date(normalizedData.lastSync || Date.now()));
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (error) {
+      console.log('API not available, using mock data:', error);
+    }
+    
+    // Fall back to mock data
+    await new Promise(r => setTimeout(r, 500));
+    setData(generateMockData());
+    console.log('📊 Using mock data');
+    setLastUpdated(new Date());
+    setLoading(false);
+  };
   
+  loadData();
+  
+  const interval = setInterval(loadData, 5 * 60 * 1000);
+  return () => clearInterval(interval);
+}, []);
+```
+
+---
+
+## FIX 3: Update Backend to Store Correct Field Names (backend/server.js)
+
+Find the Apple Health parser output and fix field names:
+```javascript
+// In processAppleHealthData or wherever conditioning sessions are created:
+// CHANGE:
+calories: Math.round(workout.calories),
+// TO:
+activeCalories: Math.round(workout.calories),
+
+// Also ensure heart rate fields are correct:
+avgHeartRate: workout.avgHeartRate || 0,
+maxHeartRate: workout.maxHeartRate || 0,
+```
+
+---
+
+## FIX 4: Fix Hevy Measurements CSV Parser (backend/server.js)
+
+The measurements are being stored with wrong values. Find the `/api/hevy/measurements/upload` endpoint and REPLACE the parsing logic:
+```javascript
+app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
     
-    const filePath = req.file.path;
-    const fileSize = req.file.size;
-    const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+    console.log('Processing Hevy measurements CSV...');
+    const fileContent = fs.readFileSync(req.file.path, 'utf8');
+    const lines = fileContent.trim().split('\n');
     
-    console.log(`[Apple Health] Starting upload processing: ${fileSizeMB}MB`);
-    
-    // Use streaming parser for ALL files (works for any size)
-    const parsedData = await parseAppleHealthExport(filePath, (lines) => {
-      console.log(`[Apple Health] Processed ${lines.toLocaleString()} lines...`);
-    });
-    
-    console.log(`[Apple Health] Parsing complete:`, parsedData.stats);
-    
-    // Process the parsed data
-    const strengthWorkoutData = {};
-    const conditioningSessions = [];
-    
-    parsedData.workouts.forEach((workout, idx) => {
-      const dateKey = workout.startDate.split('T')[0];
-      
-      if (workout.category === 'strength') {
-        strengthWorkoutData[dateKey] = {
-          duration: workout.duration,
-          activeCalories: Math.round(workout.calories),
-          avgHeartRate: workout.avgHeartRate,
-          maxHeartRate: workout.maxHeartRate
-        };
-      } else if (workout.category !== 'other') {
-        conditioningSessions.push({
-          id: `apple-${workout.startDate}-${idx}`,
-          type: workout.displayType,
-          category: workout.category,
-          date: workout.startDate,
-          source: 'Apple Health',
-          duration: workout.duration,
-          activeCalories: Math.round(workout.calories),
-          avgHeartRate: workout.avgHeartRate || 120,
-          maxHeartRate: workout.maxHeartRate || 150,
-          distance: workout.distance > 0 ? parseFloat((workout.distance / 1000).toFixed(2)) : null,
-          pace: workout.distance > 0 && workout.duration > 0 
-            ? Math.round(workout.duration / (workout.distance / 1000)) 
-            : null,
-          hrZones: { zone1: 20, zone2: 30, zone3: 30, zone4: 15, zone5: 5 }
-        });
-      }
-    });
-    
-    // Get latest weight and body fat
-    const latestWeight = parsedData.weightRecords.length > 0 ? parsedData.weightRecords[0].value : null;
-    const latestBodyFat = parsedData.bodyFatRecords.length > 0 ? parsedData.bodyFatRecords[0].value : null;
-    
-    // Calculate average resting HR
-    let avgRestingHR = null;
-    if (parsedData.restingHRRecords.length > 0) {
-      const recentHR = parsedData.restingHRRecords.slice(0, 30);
-      avgRestingHR = Math.round(recentHR.reduce((acc, r) => acc + r.value, 0) / recentHR.length);
+    if (lines.length < 2) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'CSV file is empty' });
     }
     
-    // Update data - PRESERVE existing measurements
+    // Parse headers - remove quotes and normalize
+    const rawHeaders = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+    console.log('CSV Headers:', rawHeaders);
+    
+    // Find column indices
+    const colIdx = {
+      date: rawHeaders.findIndex(h => h === 'date'),
+      weight: rawHeaders.findIndex(h => h.includes('weight')),
+      bodyFat: rawHeaders.findIndex(h => h.includes('fat')),
+      neck: rawHeaders.findIndex(h => h.includes('neck')),
+      shoulders: rawHeaders.findIndex(h => h.includes('shoulder')),
+      chest: rawHeaders.findIndex(h => h.includes('chest')),
+      leftBicep: rawHeaders.findIndex(h => h.includes('left') && h.includes('bicep')),
+      rightBicep: rawHeaders.findIndex(h => h.includes('right') && h.includes('bicep')),
+      leftForearm: rawHeaders.findIndex(h => h.includes('left') && h.includes('forearm')),
+      rightForearm: rawHeaders.findIndex(h => h.includes('right') && h.includes('forearm')),
+      abdomen: rawHeaders.findIndex(h => h.includes('abdomen')),
+      waist: rawHeaders.findIndex(h => h.includes('waist')),
+      hips: rawHeaders.findIndex(h => h.includes('hips')),
+      leftThigh: rawHeaders.findIndex(h => h.includes('left') && h.includes('thigh')),
+      rightThigh: rawHeaders.findIndex(h => h.includes('right') && h.includes('thigh')),
+      leftCalf: rawHeaders.findIndex(h => h.includes('left') && h.includes('calf')),
+      rightCalf: rawHeaders.findIndex(h => h.includes('right') && h.includes('calf')),
+    };
+    
+    console.log('Column indices:', colIdx);
+    
+    // Parse all rows
+    const measurements = [];
+    
+    for (let i = 1; i < lines.length; i++) {
+      // Handle CSV with quoted values
+      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
+      
+      const row = { date: null };
+      
+      // Parse date
+      if (colIdx.date >= 0 && values[colIdx.date]) {
+        const dateStr = values[colIdx.date];
+        // Handle "14 Jan 2025, 00:00" format
+        const match = dateStr.match(/(\d{1,2})\s+(\w+)\s+(\d{4})/);
+        if (match) {
+          const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+          row.date = new Date(parseInt(match[3]), months[match[2]], parseInt(match[1])).toISOString();
+        } else {
+          row.date = new Date(dateStr).toISOString();
+        }
+      }
+      
+      // Parse numeric values - NO unit conversion, store as-is
+      const parseNum = (idx) => {
+        if (idx < 0 || !values[idx] || values[idx] === '') return null;
+        const num = parseFloat(values[idx]);
+        return isNaN(num) ? null : num;
+      };
+      
+      row.weight = parseNum(colIdx.weight);
+      row.bodyFat = parseNum(colIdx.bodyFat);
+      row.neck = parseNum(colIdx.neck);
+      row.shoulders = parseNum(colIdx.shoulders);
+      row.chest = parseNum(colIdx.chest);
+      row.leftBicep = parseNum(colIdx.leftBicep);
+      row.rightBicep = parseNum(colIdx.rightBicep);
+      row.leftForearm = parseNum(colIdx.leftForearm);
+      row.rightForearm = parseNum(colIdx.rightForearm);
+      row.abdomen = parseNum(colIdx.abdomen);
+      row.waist = parseNum(colIdx.waist);
+      row.hips = parseNum(colIdx.hips);
+      row.leftThigh = parseNum(colIdx.leftThigh);
+      row.rightThigh = parseNum(colIdx.rightThigh);
+      row.leftCalf = parseNum(colIdx.leftCalf);
+      row.rightCalf = parseNum(colIdx.rightCalf);
+      
+      // Combined fields for convenience
+      row.biceps = row.leftBicep ?? row.rightBicep;
+      row.thighs = row.leftThigh ?? row.rightThigh;
+      row.calves = row.leftCalf ?? row.rightCalf;
+      
+      // Only include if has at least one value besides date
+      const hasData = Object.entries(row).some(([k, v]) => k !== 'date' && v !== null);
+      if (row.date && hasData) {
+        measurements.push(row);
+      }
+    }
+    
+    console.log(`Parsed ${measurements.length} measurement records`);
+    
+    if (measurements.length === 0) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'No valid measurement data found' });
+    }
+    
+    // Sort by date (newest first)
+    measurements.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    // Find the row with the most body measurements (not just weight)
+    const rowsWithMeasurements = measurements.filter(m => 
+      m.chest || m.biceps || m.waist || m.thighs
+    );
+    
+    // Use most recent row with full measurements, or just most recent
+    const latestWithMeasurements = rowsWithMeasurements[0] || measurements[0];
+    const latestWeight = measurements.find(m => m.weight !== null);
+    const latestBodyFat = measurements.find(m => m.bodyFat !== null);
+    const oldest = measurements[measurements.length - 1];
+    
+    console.log('Latest with measurements:', latestWithMeasurements);
+    console.log('Latest weight:', latestWeight?.weight);
+    console.log('Latest bodyFat:', latestBodyFat?.bodyFat);
+    
+    // Update data - PRESERVE Apple Health data for weight/bodyFat
     const data = readData();
     
-    // Merge Apple Health data with existing Hevy workouts
-    data.workouts = (data.workouts || []).map(workout => {
-      const dateKey = workout.start_time?.split('T')[0];
-      if (dateKey && strengthWorkoutData[dateKey]) {
-        return { ...workout, appleHealth: strengthWorkoutData[dateKey] };
+    // Keep Apple Health weight/bodyFat if they exist
+    const appleWeight = data.measurements?.sources?.weight === 'Apple Health' ? data.measurements.current?.weight : null;
+    const appleBodyFat = data.measurements?.sources?.bodyFat === 'Apple Health' ? data.measurements.current?.bodyFat : null;
+    
+    data.measurements = {
+      current: {
+        // Use Apple Health for weight/bodyFat if available, otherwise Hevy
+        weight: appleWeight ?? latestWeight?.weight ?? data.measurements?.current?.weight,
+        bodyFat: appleBodyFat ?? latestBodyFat?.bodyFat ?? data.measurements?.current?.bodyFat,
+        // Body measurements from Hevy (Apple doesn't have these)
+        neck: latestWithMeasurements.neck,
+        shoulders: latestWithMeasurements.shoulders,
+        chest: latestWithMeasurements.chest,
+        leftBicep: latestWithMeasurements.leftBicep,
+        rightBicep: latestWithMeasurements.rightBicep,
+        biceps: latestWithMeasurements.biceps,
+        leftForearm: latestWithMeasurements.leftForearm,
+        rightForearm: latestWithMeasurements.rightForearm,
+        abdomen: latestWithMeasurements.abdomen,
+        waist: latestWithMeasurements.waist,
+        hips: latestWithMeasurements.hips,
+        leftThigh: latestWithMeasurements.leftThigh,
+        rightThigh: latestWithMeasurements.rightThigh,
+        thighs: latestWithMeasurements.thighs,
+        leftCalf: latestWithMeasurements.leftCalf,
+        rightCalf: latestWithMeasurements.rightCalf,
+        calves: latestWithMeasurements.calves,
+      },
+      starting: {
+        weight: oldest.weight,
+        bodyFat: oldest.bodyFat,
+        chest: oldest.chest,
+        biceps: oldest.biceps,
+        waist: oldest.waist,
+        thighs: oldest.thighs,
+      },
+      history: measurements,
+      sources: {
+        weight: appleWeight ? 'Apple Health' : 'Hevy',
+        bodyFat: appleBodyFat ? 'Apple Health' : 'Hevy',
+        measurements: 'Hevy'
       }
-      return workout;
-    });
-    
-    // Add/update conditioning sessions
-    if (conditioningSessions.length > 0) {
-      data.conditioning = conditioningSessions.sort((a, b) => new Date(b.date) - new Date(a.date));
-    }
-    
-    // Update measurements - PRESERVE existing body part measurements!
-    data.measurements = data.measurements || { current: {}, starting: {} };
-    if (latestWeight !== null) {
-      data.measurements.current.weight = latestWeight;
-    }
-    if (latestBodyFat !== null) {
-      data.measurements.current.bodyFat = latestBodyFat;
-    }
-    
-    // Update resting HR
-    if (avgRestingHR !== null) {
-      data.appleHealth = data.appleHealth || {};
-      data.appleHealth.restingHeartRate = avgRestingHR;
-    }
+    };
     
     data.lastSync = new Date().toISOString();
     
-    // Cleanup uploaded file
-    fs.unlinkSync(filePath);
-    
-    const processingTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    fs.unlinkSync(req.file.path);
     
     if (writeData(data)) {
-      console.log(`[Apple Health] Success! Processed in ${processingTime}s`);
+      console.log('Saved measurements:', data.measurements.current);
       res.json({ 
-        success: true,
-        processingTimeSeconds: processingTime,
-        stats: parsedData.stats,
-        conditioningSessions: conditioningSessions.length,
-        strengthWorkoutsEnriched: Object.keys(strengthWorkoutData).length,
-        weight: latestWeight,
-        bodyFat: latestBodyFat,
-        restingHR: avgRestingHR
+        success: true, 
+        count: measurements.length,
+        current: data.measurements.current,
+        sources: data.measurements.sources
       });
     } else {
       res.status(500).json({ error: 'Failed to save data' });
     }
     
   } catch (error) {
-    console.error('[Apple Health] Upload error:', error);
+    console.error('Hevy measurements error:', error);
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -354,212 +419,47 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
 
 ---
 
-## FIX 2: Hevy Measurements CSV Parser
+## FIX 5: Fix Apple Health Parser Field Names (backend/apple-health-parser.js or server.js)
 
-The current parser may not match Hevy's actual CSV format.
-
-### First, show me the actual Hevy CSV columns by asking the user to run:
-```bash
-# On Mac, if they have a Hevy export:
-head -2 ~/Downloads/*.csv
-```
-
-### Then update the parser to handle whatever format Hevy uses.
-
-Common Hevy CSV issues:
-- Date format might be different (DD/MM/YYYY vs YYYY-MM-DD)
-- Column names might have different casing
-- Units might be in column name or separate column
-
-Update the column mapping in the `/api/hevy/measurements/upload` endpoint:
-
+Find where conditioning sessions are created and ensure correct field names:
 ```javascript
-// More comprehensive column mapping
-const columnMap = {
-  // Date variations
-  'date': 'date',
-  'recorded': 'date',
-  'recorded_at': 'date',
-  'timestamp': 'date',
-  
-  // Weight variations
-  'weight_kg': 'weight',
-  'weight': 'weight',
-  'body_weight': 'weight',
-  'body_weight_kg': 'weight',
-  'bodyweight': 'weight',
-  
-  // Body fat variations
-  'body_fat_%': 'bodyFat',
-  'body_fat': 'bodyFat',
-  'body_fat_pct': 'bodyFat',
-  'body_fat_percentage': 'bodyFat',
-  'bodyfat': 'bodyFat',
-  'bodyfat_%': 'bodyFat',
-  'fat_%': 'bodyFat',
-  'fat_pct': 'bodyFat',
-  
-  // Measurements (handle both with and without _cm suffix)
-  'neck_cm': 'neck', 'neck': 'neck',
-  'shoulders_cm': 'shoulders', 'shoulders': 'shoulders',
-  'chest_cm': 'chest', 'chest': 'chest',
-  'left_bicep_cm': 'leftBicep', 'left_bicep': 'leftBicep', 'l_bicep': 'leftBicep',
-  'right_bicep_cm': 'rightBicep', 'right_bicep': 'rightBicep', 'r_bicep': 'rightBicep',
-  'bicep_cm': 'biceps', 'bicep': 'biceps', 'biceps': 'biceps',
-  'left_forearm_cm': 'leftForearm', 'left_forearm': 'leftForearm',
-  'right_forearm_cm': 'rightForearm', 'right_forearm': 'rightForearm',
-  'waist_cm': 'waist', 'waist': 'waist',
-  'hips_cm': 'hips', 'hips': 'hips',
-  'left_thigh_cm': 'leftThigh', 'left_thigh': 'leftThigh', 'l_thigh': 'leftThigh',
-  'right_thigh_cm': 'rightThigh', 'right_thigh': 'rightThigh', 'r_thigh': 'rightThigh',
-  'thigh_cm': 'thighs', 'thigh': 'thighs', 'thighs': 'thighs',
-  'left_calf_cm': 'leftCalf', 'left_calf': 'leftCalf',
-  'right_calf_cm': 'rightCalf', 'right_calf': 'rightCalf',
-  'calf_cm': 'calves', 'calf': 'calves', 'calves': 'calves',
-};
-
-// More flexible header normalization
-const normalizeHeader = (header) => {
-  return header
-    .toLowerCase()
-    .trim()
-    .replace(/[()%]/g, '')      // Remove (), %
-    .replace(/\s+/g, '_')       // Spaces to underscores
-    .replace(/__+/g, '_')       // Multiple underscores to single
-    .replace(/^_|_$/g, '');     // Remove leading/trailing underscores
-};
+// When creating conditioning sessions, use activeCalories NOT calories:
+conditioningSessions.push({
+  id: `apple-${workout.startDate}-${idx}`,
+  type: workout.displayType,
+  category: workout.category,
+  date: workout.startDate,
+  source: 'Apple Health',
+  duration: workout.duration,
+  activeCalories: Math.round(workout.calories),  // USE activeCalories
+  avgHeartRate: workout.avgHeartRate || 0,
+  maxHeartRate: workout.maxHeartRate || 0,
+  distance: workout.distance > 0 ? parseFloat((workout.distance / 1000).toFixed(2)) : null,
+  pace: null,
+  hrZones: { zone1: 20, zone2: 30, zone3: 30, zone4: 15, zone5: 5 }
+});
 ```
 
 ---
 
-## FIX 3: Tooltip Z-Index (Still Behind Card)
-
-The tooltip has `z-[9999]` but the PARENT CARD creates a new stacking context that traps the tooltip.
-
-### Solution: Use a React Portal to render tooltip at document root
-
-In `src/App.jsx`, replace the Tooltip component:
-
-```jsx
-import { createPortal } from 'react-dom';
-
-const Tooltip = ({ children, content, position = 'top' }) => {
-  const [show, setShow] = useState(false);
-  const [coords, setCoords] = useState({ top: 0, left: 0 });
-  const triggerRef = useRef(null);
-  
-  const updatePosition = () => {
-    if (!triggerRef.current) return;
-    const rect = triggerRef.current.getBoundingClientRect();
-    const scrollY = window.scrollY;
-    const scrollX = window.scrollX;
-    
-    let top, left;
-    
-    switch (position) {
-      case 'top':
-        top = rect.top + scrollY - 8;
-        left = rect.left + scrollX + rect.width / 2;
-        break;
-      case 'bottom':
-        top = rect.bottom + scrollY + 8;
-        left = rect.left + scrollX + rect.width / 2;
-        break;
-      case 'left':
-        top = rect.top + scrollY + rect.height / 2;
-        left = rect.left + scrollX - 8;
-        break;
-      case 'right':
-        top = rect.top + scrollY + rect.height / 2;
-        left = rect.right + scrollX + 8;
-        break;
-      default:
-        top = rect.top + scrollY - 8;
-        left = rect.left + scrollX + rect.width / 2;
-    }
-    
-    setCoords({ top, left });
-  };
-  
-  const handleMouseEnter = () => {
-    updatePosition();
-    setShow(true);
-  };
-  
-  const positionClasses = {
-    top: '-translate-x-1/2 -translate-y-full',
-    bottom: '-translate-x-1/2',
-    left: '-translate-x-full -translate-y-1/2',
-    right: '-translate-y-1/2'
-  };
-  
-  return (
-    <>
-      <span 
-        ref={triggerRef}
-        className="relative inline-block"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={() => setShow(false)}
-      >
-        {children}
-      </span>
-      {show && createPortal(
-        <div 
-          className={`fixed ${positionClasses[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs whitespace-normal pointer-events-none`}
-          style={{ 
-            top: coords.top, 
-            left: coords.left, 
-            zIndex: 99999 
-          }}
-        >
-          {content}
-        </div>,
-        document.body
-      )}
-    </>
-  );
-};
-```
-
-Also add `useRef` to the imports at the top of the file if not already there:
-```jsx
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
-```
-
----
-
-## DEPLOYMENT
-
-After making all changes:
-
+## DEPLOYMENT & VERIFICATION
 ```bash
 # Commit and push
-git add .
-git commit -m "Fix: Apple Health streaming parser, tooltip portal, CSV parsing"
+git add -A
+git commit -m "Robust data normalization - handles any format"
 git push origin main
 
-# Deploy to Pi5
-ssh pi@192.168.1.73
-cd ~/hit-tracker-pro
-git pull origin main
-docker compose down
-docker compose up -d --build
+# Deploy
+ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && git pull && docker compose down && docker compose up -d --build"
 
-# Watch logs to verify
-docker compose logs -f backend
+# Wait and verify
+sleep 30
+
+# Check the data structure
+ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && docker compose exec backend cat /app/data/fitness-data.json | head -100"
 ```
 
-## TESTING
-
-1. Test Apple Health upload with your 150MB file
-2. Test Hevy measurements CSV upload
-3. Test tooltip hover on Key Lifts card - should appear ABOVE adjacent card now
-
----
-
-## IMPORTANT NOTES
-
-- The streaming parser processes line-by-line, using <100MB RAM even for 150MB files
-- The Portal renders tooltips at document root, escaping all stacking contexts
-- Always PRESERVE existing body measurements when updating from Apple Health
+Then re-upload your Hevy measurement_data.csv and verify:
+- Chest should be 40"
+- Biceps should be 14"
+- Cardio should show HR and calories properly

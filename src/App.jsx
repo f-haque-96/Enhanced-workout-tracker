@@ -29,6 +29,114 @@ const COLORS = {
 };
 
 // ============================================
+// DATA NORMALIZATION - Handles any format
+// ============================================
+
+const normalizeMeasurements = (raw) => {
+  if (!raw) return { current: {}, starting: {}, history: [] };
+
+  const normalize = (obj) => {
+    if (!obj) return {};
+    return {
+      weight: obj.weight ?? obj.weight_kg ?? obj.bodyMass ?? null,
+      bodyFat: obj.bodyFat ?? obj.fat_percent ?? obj.body_fat ?? obj.fatPercent ?? null,
+      leanMass: obj.leanMass ?? obj.lean_mass ?? obj.leanBodyMass ?? null,
+      neck: obj.neck ?? obj.neck_in ?? obj.neckIn ?? null,
+      shoulders: obj.shoulders ?? obj.shoulder_in ?? obj.shoulderIn ?? null,
+      chest: obj.chest ?? obj.chest_in ?? obj.chestIn ?? null,
+      leftBicep: obj.leftBicep ?? obj.left_bicep_in ?? obj.left_bicep ?? null,
+      rightBicep: obj.rightBicep ?? obj.right_bicep_in ?? obj.right_bicep ?? null,
+      biceps: obj.biceps ?? obj.leftBicep ?? obj.rightBicep ?? obj.left_bicep_in ?? obj.right_bicep_in ?? obj.left_bicep ?? obj.right_bicep ?? null,
+      leftForearm: obj.leftForearm ?? obj.left_forearm_in ?? obj.left_forearm ?? null,
+      rightForearm: obj.rightForearm ?? obj.right_forearm_in ?? obj.right_forearm ?? null,
+      abdomen: obj.abdomen ?? obj.abdomen_in ?? null,
+      waist: obj.waist ?? obj.waist_in ?? obj.waistIn ?? null,
+      hips: obj.hips ?? obj.hips_in ?? obj.hipsIn ?? null,
+      leftThigh: obj.leftThigh ?? obj.left_thigh_in ?? obj.left_thigh ?? null,
+      rightThigh: obj.rightThigh ?? obj.right_thigh_in ?? obj.right_thigh ?? null,
+      thighs: obj.thighs ?? obj.leftThigh ?? obj.rightThigh ?? obj.left_thigh_in ?? obj.right_thigh_in ?? obj.left_thigh ?? obj.right_thigh ?? null,
+      leftCalf: obj.leftCalf ?? obj.left_calf_in ?? obj.left_calf ?? null,
+      rightCalf: obj.rightCalf ?? obj.right_calf_in ?? obj.right_calf ?? null,
+      calves: obj.calves ?? null,
+    };
+  };
+
+  return {
+    current: normalize(raw.current),
+    starting: normalize(raw.starting),
+    history: raw.history || [],
+    sources: raw.sources || {}
+  };
+};
+
+const normalizeConditioningSession = (session) => {
+  if (!session) return null;
+
+  return {
+    id: session.id ?? `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    type: session.type ?? session.workoutType ?? session.activityType ?? 'Other',
+    category: session.category ?? 'other',
+    date: session.date ?? session.startDate ?? session.start_time ?? null,
+    source: session.source ?? 'Unknown',
+    duration: session.duration ?? session.durationSeconds ?? (session.durationMinutes ? session.durationMinutes * 60 : 0),
+    activeCalories: session.activeCalories ?? session.calories ?? session.totalCalories ?? session.energyBurned ?? session.active_calories ?? 0,
+    avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? session.hr_avg ?? session.heartRateAvg ?? session.avg_hr ?? 0,
+    maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? session.hr_max ?? session.heartRateMax ?? session.max_hr ?? 0,
+    distance: session.distance ?? session.totalDistance ?? session.distanceKm ?? 0,
+    pace: session.pace ?? session.avgPace ?? null,
+    hrZones: session.hrZones ?? { zone1: 20, zone2: 30, zone3: 30, zone4: 15, zone5: 5 }
+  };
+};
+
+const normalizeConditioning = (raw) => {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw.map(normalizeConditioningSession).filter(s => s !== null);
+};
+
+const normalizeWorkout = (workout) => {
+  if (!workout) return null;
+
+  const appleHealth = workout.appleHealth ? {
+    duration: workout.appleHealth.duration ?? workout.appleHealth.durationSeconds ?? 0,
+    activeCalories: workout.appleHealth.activeCalories ?? workout.appleHealth.calories ?? workout.appleHealth.totalCalories ?? 0,
+    avgHeartRate: workout.appleHealth.avgHeartRate ?? workout.appleHealth.averageHeartRate ?? workout.appleHealth.hr_avg ?? 0,
+    maxHeartRate: workout.appleHealth.maxHeartRate ?? workout.appleHealth.maximumHeartRate ?? workout.appleHealth.hr_max ?? 0,
+  } : null;
+
+  return {
+    ...workout,
+    appleHealth
+  };
+};
+
+const normalizeWorkouts = (raw) => {
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw.map(normalizeWorkout).filter(w => w !== null);
+};
+
+const normalizeAppleHealth = (raw) => {
+  if (!raw) return { restingHeartRate: null, avgSteps: null, avgActiveCalories: null, sleepAvg: null };
+  return {
+    restingHeartRate: raw.restingHeartRate ?? raw.resting_hr ?? raw.restingHR ?? null,
+    avgSteps: raw.avgSteps ?? raw.steps ?? null,
+    avgActiveCalories: raw.avgActiveCalories ?? raw.activeCalories ?? null,
+    sleepAvg: raw.sleepAvg ?? raw.sleep ?? null,
+  };
+};
+
+const normalizeApiData = (raw) => {
+  if (!raw) return null;
+  return {
+    workouts: normalizeWorkouts(raw.workouts),
+    conditioning: normalizeConditioning(raw.conditioning),
+    measurements: normalizeMeasurements(raw.measurements),
+    appleHealth: normalizeAppleHealth(raw.appleHealth),
+    lastSync: raw.lastSync,
+    lastWebhook: raw.lastWebhook,
+  };
+};
+
+// ============================================
 // YOUR 5 KEY LIFTS - Hevy Name Mappings
 // ============================================
 const KEY_LIFTS_CONFIG = {
@@ -1332,24 +1440,26 @@ const App = () => {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      
+
       try {
         // Try to fetch from API (real Hevy data)
         const res = await fetch(`${API_BASE_URL}/data`);
         if (res.ok) {
           const apiData = await res.json();
-          if (apiData.workouts && apiData.workouts.length > 0) {
-            setData(apiData);
-            console.log('✅ Loaded real data from API');
-            setLastUpdated(new Date(apiData.lastSync || Date.now()));
+          // NORMALIZE the data before using it
+          const normalizedData = normalizeApiData(apiData);
+          if (normalizedData && (normalizedData.workouts.length > 0 || normalizedData.conditioning.length > 0)) {
+            setData(normalizedData);
+            console.log('✅ Loaded and normalized API data:', normalizedData);
+            setLastUpdated(new Date(normalizedData.lastSync || Date.now()));
             setLoading(false);
             return;
           }
         }
       } catch (error) {
-        console.log('API not available, using mock data');
+        console.log('API not available, using mock data:', error);
       }
-      
+
       // Fall back to mock data
       await new Promise(r => setTimeout(r, 500));
       setData(generateMockData());
@@ -1357,9 +1467,9 @@ const App = () => {
       setLastUpdated(new Date());
       setLoading(false);
     };
-    
+
     loadData();
-    
+
     // Refresh data every 5 minutes to catch auto-syncs
     const interval = setInterval(loadData, 5 * 60 * 1000);
     return () => clearInterval(interval);
@@ -1374,13 +1484,14 @@ const App = () => {
         const syncData = await syncRes.json();
         console.log('Hevy sync complete:', syncData);
       }
-      
+
       // Fetch updated data
       const dataRes = await fetch(`${API_BASE_URL}/data`);
       if (dataRes.ok) {
         const newData = await dataRes.json();
-        if (newData.workouts && newData.workouts.length > 0) {
-          setData(newData);
+        const normalizedData = normalizeApiData(newData);
+        if (normalizedData && (normalizedData.workouts.length > 0 || normalizedData.conditioning.length > 0)) {
+          setData(normalizedData);
         }
       }
     } catch (error) {

@@ -352,12 +352,18 @@ function processAppleHealthData(parsedData) {
     } else {
       // Add to conditioning sessions
       conditioningSessions.push({
+        id: `apple-conditioning-${workout.startDate}`,
         date: workout.startDate,
         type: workout.type,
         category: workout.category,
+        source: 'Apple Health',
         duration: workout.duration,
-        calories: workout.calories,
-        distance: workout.distance
+        activeCalories: Math.round(workout.calories || 0),
+        avgHeartRate: workout.avgHeartRate || 0,
+        maxHeartRate: workout.maxHeartRate || 0,
+        distance: workout.distance || 0,
+        pace: null,
+        hrZones: { zone1: 20, zone2: 30, zone3: 30, zone4: 15, zone5: 5 }
       });
     }
   });
@@ -544,195 +550,170 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
+    console.log('Processing Hevy measurements CSV...');
     const fileContent = fs.readFileSync(req.file.path, 'utf8');
     const lines = fileContent.trim().split('\n');
 
     if (lines.length < 2) {
       fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'CSV file is empty or invalid' });
+      return res.status(400).json({ error: 'CSV file is empty' });
     }
 
-    console.log('Processing Hevy measurements CSV...');
+    // Parse headers - remove quotes and normalize
+    const rawHeaders = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+    console.log('CSV Headers:', rawHeaders);
 
-    // Detect delimiter (comma or semicolon)
-    const delimiter = lines[0].includes(';') ? ';' : ',';
-
-    // Parse header row - normalize column names
-    const headers = lines[0].split(delimiter).map(h =>
-      h.trim().replace(/^"|"$/g, '').toLowerCase()
-        .replace(/[()]/g, '')           // Remove parentheses
-        .replace(/\s+/g, '_')           // Replace spaces with underscore
-        .replace(/%/g, 'pct')           // Replace % with pct
-    );
-
-    console.log('CSV headers:', headers);
-
-    // Column mapping for Hevy export format
-    // IMPORTANT: Hevy uses INCHES (_in) not centimeters (_cm)
-    const columnMap = {
-      // Date variations
-      'date': 'date',
-      'recorded': 'date',
-      'recorded_at': 'date',
-
-      // Weight variations
-      'weight_kg': 'weight',
-      'weight': 'weight',
-      'body_weight': 'weight',
-      'bodyweight': 'weight',
-
-      // Body fat variations - Hevy uses "fat_percent"!
-      'fat_percent': 'bodyFat',
-      'body_fat_pct': 'bodyFat',
-      'body_fat': 'bodyFat',
-      'bodyfat': 'bodyFat',
-      'fat_pct': 'bodyFat',
-
-      // Measurements in CENTIMETERS
-      'neck_cm': 'neck',
-      'shoulders_cm': 'shoulders',
-      'shoulder_cm': 'shoulders',
-      'chest_cm': 'chest',
-      'left_bicep_cm': 'leftBicep',
-      'right_bicep_cm': 'rightBicep',
-      'bicep_cm': 'biceps',
-      'left_forearm_cm': 'leftForearm',
-      'right_forearm_cm': 'rightForearm',
-      'abdomen_cm': 'abdomen',
-      'waist_cm': 'waist',
-      'hips_cm': 'hips',
-      'left_thigh_cm': 'leftThigh',
-      'right_thigh_cm': 'rightThigh',
-      'thigh_cm': 'thighs',
-      'left_calf_cm': 'leftCalf',
-      'right_calf_cm': 'rightCalf',
-
-      // Measurements in INCHES (Hevy's actual format) - store as-is, NO conversion
-      'neck_in': 'neck',
-      'shoulder_in': 'shoulders',
-      'chest_in': 'chest',
-      'left_bicep_in': 'leftBicep',
-      'right_bicep_in': 'rightBicep',
-      'bicep_in': 'biceps',
-      'left_forearm_in': 'leftForearm',
-      'right_forearm_in': 'rightForearm',
-      'abdomen_in': 'abdomen',
-      'waist_in': 'waist',
-      'hips_in': 'hips',
-      'left_thigh_in': 'leftThigh',
-      'right_thigh_in': 'rightThigh',
-      'thigh_in': 'thighs',
-      'left_calf_in': 'leftCalf',
-      'right_calf_in': 'rightCalf',
+    // Find column indices
+    const colIdx = {
+      date: rawHeaders.findIndex(h => h === 'date'),
+      weight: rawHeaders.findIndex(h => h.includes('weight')),
+      bodyFat: rawHeaders.findIndex(h => h.includes('fat')),
+      neck: rawHeaders.findIndex(h => h.includes('neck')),
+      shoulders: rawHeaders.findIndex(h => h.includes('shoulder')),
+      chest: rawHeaders.findIndex(h => h.includes('chest')),
+      leftBicep: rawHeaders.findIndex(h => h.includes('left') && h.includes('bicep')),
+      rightBicep: rawHeaders.findIndex(h => h.includes('right') && h.includes('bicep')),
+      leftForearm: rawHeaders.findIndex(h => h.includes('left') && h.includes('forearm')),
+      rightForearm: rawHeaders.findIndex(h => h.includes('right') && h.includes('forearm')),
+      abdomen: rawHeaders.findIndex(h => h.includes('abdomen')),
+      waist: rawHeaders.findIndex(h => h.includes('waist')),
+      hips: rawHeaders.findIndex(h => h.includes('hips')),
+      leftThigh: rawHeaders.findIndex(h => h.includes('left') && h.includes('thigh')),
+      rightThigh: rawHeaders.findIndex(h => h.includes('right') && h.includes('thigh')),
+      leftCalf: rawHeaders.findIndex(h => h.includes('left') && h.includes('calf')),
+      rightCalf: rawHeaders.findIndex(h => h.includes('right') && h.includes('calf')),
     };
 
+    console.log('Column indices:', colIdx);
+
+    // Parse all rows
     const measurements = [];
 
-    // Parse data rows
     for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(delimiter).map(v => v.trim().replace(/^"|"$/g, '')); // Remove quotes
-      if (values.length < 2) continue;
+      // Handle CSV with quoted values
+      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
 
-      const row = {};
-      headers.forEach((header, idx) => {
-        const mappedKey = columnMap[header];
-        if (mappedKey && values[idx] && values[idx] !== '') {
-          if (mappedKey === 'date') {
-            row[mappedKey] = parseHevyDate(values[idx]);
-          } else {
-            const val = parseFloat(values[idx]);
-            if (!isNaN(val)) {
-              // Store inches as-is - NO conversion to cm
-              row[mappedKey] = val;
-            }
-          }
+      const row = { date: null };
+
+      // Parse date
+      if (colIdx.date >= 0 && values[colIdx.date]) {
+        const dateStr = values[colIdx.date];
+        // Handle "14 Jan 2025, 00:00" format
+        const match = dateStr.match(/(\d{1,2})\s+(\w+)\s+(\d{4})/);
+        if (match) {
+          const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+          row.date = new Date(parseInt(match[3]), months[match[2]], parseInt(match[1])).toISOString();
+        } else {
+          row.date = new Date(dateStr).toISOString();
         }
-      });
+      }
 
-      if (Object.keys(row).length > 1) {
+      // Parse numeric values - NO unit conversion, store as-is
+      const parseNum = (idx) => {
+        if (idx < 0 || !values[idx] || values[idx] === '') return null;
+        const num = parseFloat(values[idx]);
+        return isNaN(num) ? null : num;
+      };
+
+      row.weight = parseNum(colIdx.weight);
+      row.bodyFat = parseNum(colIdx.bodyFat);
+      row.neck = parseNum(colIdx.neck);
+      row.shoulders = parseNum(colIdx.shoulders);
+      row.chest = parseNum(colIdx.chest);
+      row.leftBicep = parseNum(colIdx.leftBicep);
+      row.rightBicep = parseNum(colIdx.rightBicep);
+      row.leftForearm = parseNum(colIdx.leftForearm);
+      row.rightForearm = parseNum(colIdx.rightForearm);
+      row.abdomen = parseNum(colIdx.abdomen);
+      row.waist = parseNum(colIdx.waist);
+      row.hips = parseNum(colIdx.hips);
+      row.leftThigh = parseNum(colIdx.leftThigh);
+      row.rightThigh = parseNum(colIdx.rightThigh);
+      row.leftCalf = parseNum(colIdx.leftCalf);
+      row.rightCalf = parseNum(colIdx.rightCalf);
+
+      // Combined fields for convenience
+      row.biceps = row.leftBicep ?? row.rightBicep;
+      row.thighs = row.leftThigh ?? row.rightThigh;
+      row.calves = row.leftCalf ?? row.rightCalf;
+
+      // Only include if has at least one value besides date
+      const hasData = Object.entries(row).some(([k, v]) => k !== 'date' && v !== null);
+      if (row.date && hasData) {
         measurements.push(row);
       }
     }
 
+    console.log(`Parsed ${measurements.length} measurement records`);
+
     if (measurements.length === 0) {
       fs.unlinkSync(req.file.path);
-      return res.status(400).json({
-        error: 'No valid measurement data found in CSV',
-        suggestion: 'Make sure the CSV has headers: Date, Weight (kg), Body Fat (%), etc.'
-      });
+      return res.status(400).json({ error: 'No valid measurement data found' });
     }
 
     // Sort by date (newest first)
-    measurements.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    measurements.sort((a, b) => new Date(b.date) - new Date(a.date));
 
-    const data = readData();
-    const latest = measurements[0];
+    // Find the row with the most body measurements (not just weight)
+    const rowsWithMeasurements = measurements.filter(m =>
+      m.chest || m.biceps || m.waist || m.thighs
+    );
+
+    // Use most recent row with full measurements, or just most recent
+    const latestWithMeasurements = rowsWithMeasurements[0] || measurements[0];
+    const latestWeight = measurements.find(m => m.weight !== null);
+    const latestBodyFat = measurements.find(m => m.bodyFat !== null);
     const oldest = measurements[measurements.length - 1];
 
-    // Helper to get average of left/right measurements
-    const avg = (left, right) => {
-      if (left && right) return (left + right) / 2;
-      return left || right || null;
-    };
+    console.log('Latest with measurements:', latestWithMeasurements);
+    console.log('Latest weight:', latestWeight?.weight);
+    console.log('Latest bodyFat:', latestBodyFat?.bodyFat);
 
-    // Apple Health has PRIORITY over Hevy for weight/bodyFat
-    // Hevy is only used for body measurements (chest, biceps, waist, etc.)
-    const sources = data.measurements.sources || {};
-    const appleHealthHasWeight = sources.weight === 'Apple Health';
-    const appleHealthHasBodyFat = sources.bodyFat === 'Apple Health';
+    // Update data - PRESERVE Apple Health data for weight/bodyFat
+    const data = readData();
 
-    // Update current measurements (preserve existing data if not in CSV)
-    data.measurements.current = {
-      ...data.measurements.current,
-      // Only update weight if Apple Health hasn't set it
-      weight: appleHealthHasWeight
-        ? data.measurements.current?.weight
-        : (latest.weight || data.measurements.current?.weight || null),
-      // Only update bodyFat if Apple Health hasn't set it
-      bodyFat: appleHealthHasBodyFat
-        ? data.measurements.current?.bodyFat
-        : (latest.bodyFat || data.measurements.current?.bodyFat || null),
-      // Hevy only for body measurements (Apple doesn't track these)
-      neck: latest.neck || data.measurements.current?.neck || null,
-      shoulders: latest.shoulders || data.measurements.current?.shoulders || null,
-      chest: latest.chest || data.measurements.current?.chest || null,
-      biceps: avg(latest.leftBicep, latest.rightBicep) || data.measurements.current?.biceps || null,
-      abdomen: latest.abdomen || data.measurements.current?.abdomen || null,
-      waist: latest.waist || data.measurements.current?.waist || null,
-      hips: latest.hips || data.measurements.current?.hips || null,
-      thighs: avg(latest.leftThigh, latest.rightThigh) || data.measurements.current?.thighs || null,
-      calves: avg(latest.leftCalf, latest.rightCalf) || data.measurements.current?.calves || null,
-    };
+    // Keep Apple Health weight/bodyFat if they exist
+    const appleWeight = data.measurements?.sources?.weight === 'Apple Health' ? data.measurements.current?.weight : null;
+    const appleBodyFat = data.measurements?.sources?.bodyFat === 'Apple Health' ? data.measurements.current?.bodyFat : null;
 
-    // Update starting measurements
-    data.measurements.starting = {
-      ...data.measurements.starting,
-      // Only update weight if Apple Health hasn't set it
-      weight: appleHealthHasWeight
-        ? data.measurements.starting?.weight
-        : (oldest.weight || data.measurements.starting?.weight || null),
-      // Only update bodyFat if Apple Health hasn't set it
-      bodyFat: appleHealthHasBodyFat
-        ? data.measurements.starting?.bodyFat
-        : (oldest.bodyFat || data.measurements.starting?.bodyFat || null),
-      // Hevy only for body measurements
-      neck: oldest.neck || data.measurements.starting?.neck || null,
-      shoulders: oldest.shoulders || data.measurements.starting?.shoulders || null,
-      chest: oldest.chest || data.measurements.starting?.chest || null,
-      biceps: avg(oldest.leftBicep, oldest.rightBicep) || data.measurements.starting?.biceps || null,
-      abdomen: oldest.abdomen || data.measurements.starting?.abdomen || null,
-      waist: oldest.waist || data.measurements.starting?.waist || null,
-      hips: oldest.hips || data.measurements.starting?.hips || null,
-      thighs: avg(oldest.leftThigh, oldest.rightThigh) || data.measurements.starting?.thighs || null,
-      calves: avg(oldest.leftCalf, oldest.rightCalf) || data.measurements.starting?.calves || null,
-    };
-
-    // Mark data sources - Hevy only for measurements, not weight/bodyFat if Apple Health has set them
-    data.measurements.sources = {
-      ...sources,
-      weight: appleHealthHasWeight ? 'Apple Health' : 'Hevy',
-      bodyFat: appleHealthHasBodyFat ? 'Apple Health' : 'Hevy',
-      measurements: 'Hevy'
+    data.measurements = {
+      current: {
+        // Use Apple Health for weight/bodyFat if available, otherwise Hevy
+        weight: appleWeight ?? latestWeight?.weight ?? data.measurements?.current?.weight,
+        bodyFat: appleBodyFat ?? latestBodyFat?.bodyFat ?? data.measurements?.current?.bodyFat,
+        // Body measurements from Hevy (Apple doesn't have these)
+        neck: latestWithMeasurements.neck,
+        shoulders: latestWithMeasurements.shoulders,
+        chest: latestWithMeasurements.chest,
+        leftBicep: latestWithMeasurements.leftBicep,
+        rightBicep: latestWithMeasurements.rightBicep,
+        biceps: latestWithMeasurements.biceps,
+        leftForearm: latestWithMeasurements.leftForearm,
+        rightForearm: latestWithMeasurements.rightForearm,
+        abdomen: latestWithMeasurements.abdomen,
+        waist: latestWithMeasurements.waist,
+        hips: latestWithMeasurements.hips,
+        leftThigh: latestWithMeasurements.leftThigh,
+        rightThigh: latestWithMeasurements.rightThigh,
+        thighs: latestWithMeasurements.thighs,
+        leftCalf: latestWithMeasurements.leftCalf,
+        rightCalf: latestWithMeasurements.rightCalf,
+        calves: latestWithMeasurements.calves,
+      },
+      starting: {
+        weight: oldest.weight,
+        bodyFat: oldest.bodyFat,
+        chest: oldest.chest,
+        biceps: oldest.biceps,
+        waist: oldest.waist,
+        thighs: oldest.thighs,
+      },
+      history: measurements,
+      sources: {
+        weight: appleWeight ? 'Apple Health' : 'Hevy',
+        bodyFat: appleBodyFat ? 'Apple Health' : 'Hevy',
+        measurements: 'Hevy'
+      }
     };
 
     data.lastSync = new Date().toISOString();
@@ -740,13 +721,15 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
     fs.unlinkSync(req.file.path);
 
     if (writeData(data)) {
+      console.log('Saved measurements:', data.measurements.current);
       res.json({
         success: true,
-        measurementsCount: measurements.length,
-        latest: data.measurements.current
+        count: measurements.length,
+        current: data.measurements.current,
+        sources: data.measurements.sources
       });
     } else {
-      res.status(500).json({ error: 'Failed to save measurements' });
+      res.status(500).json({ error: 'Failed to save data' });
     }
 
   } catch (error) {
