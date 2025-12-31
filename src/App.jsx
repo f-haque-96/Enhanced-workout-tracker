@@ -102,8 +102,9 @@ const HEVY_CATEGORIES = {
   legs: {
     quads: ['Squat', 'Leg Press', 'Leg Extension', 'Lunges', 'Front Squat', 'Hack Squat', 'Bulgarian Split Squat', 'Step Up', 'Goblet Squat'],
     hamstrings: ['Romanian Deadlift', 'Leg Curl', 'Stiff Leg Deadlift', 'Good Morning', 'Nordic Curl', 'Lying Leg Curl'],
-    glutes: ['Hip Thrust', 'Glute Bridge', 'Cable Kickback', 'Sumo Deadlift'],
-    calves: ['Calf Raise', 'Seated Calf Raise', 'Standing Calf Raise', 'Donkey Calf Raise']
+    glutes: ['Hip Thrust', 'Glute Bridge', 'Cable Kickback', 'Sumo Deadlift', 'Kettlebell Swing', 'KB Swing'],
+    calves: ['Calf Raise', 'Seated Calf Raise', 'Standing Calf Raise', 'Donkey Calf Raise'],
+    abs: ['Leg Raise', 'Hanging Leg Raise', 'Parallel Bar', 'Plank', 'Ab Wheel', 'Crunch']
   }
 };
 
