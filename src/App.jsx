@@ -374,11 +374,31 @@ const generateMockData = () => {
 // ============================================
 const Tooltip = ({ children, content, position = 'top' }) => {
   const [show, setShow] = useState(false);
-  const pos = { top: 'bottom-full left-1/2 -translate-x-1/2 mb-2', bottom: 'top-full left-1/2 -translate-x-1/2 mt-2', left: 'right-full top-1/2 -translate-y-1/2 mr-2', right: 'left-full top-1/2 -translate-y-1/2 ml-2' };
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const ref = useRef(null);
+
+  const handleMouseEnter = () => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect();
+      setCoords({ x: rect.left + rect.width / 2, y: rect.top });
+    }
+    setShow(true);
+  };
+
+  const getPosition = () => {
+    const offset = 8;
+    switch(position) {
+      case 'bottom': return { left: coords.x, top: coords.y + offset, transform: 'translate(-50%, 0)' };
+      case 'left': return { left: coords.x - offset, top: coords.y, transform: 'translate(-100%, -50%)' };
+      case 'right': return { left: coords.x + offset, top: coords.y, transform: 'translate(0, -50%)' };
+      default: return { left: coords.x, top: coords.y - offset, transform: 'translate(-50%, -100%)' };
+    }
+  };
+
   return (
-    <div className="relative inline-block" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <div ref={ref} className="relative inline-block" onMouseEnter={handleMouseEnter} onMouseLeave={() => setShow(false)}>
       {children}
-      {show && <div className={`absolute z-[9999] ${pos[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs pointer-events-none`}>{content}</div>}
+      {show && <div className="fixed z-[9999] px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs pointer-events-none" style={getPosition()}>{content}</div>}
     </div>
   );
 };
@@ -1332,7 +1352,7 @@ const App = () => {
       </div>
       
       {/* Header */}
-      <header className="relative z-10 border-b border-white/10 backdrop-blur-xl bg-slate-950/80 sticky top-0">
+      <header className="relative z-[1000] border-b border-white/10 backdrop-blur-xl bg-slate-950/80 sticky top-0">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1359,7 +1379,7 @@ const App = () => {
       </header>
       
       {/* Main */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 py-6 space-y-6">
+      <main className="relative z-0 max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Data Source Info */}
         <div className="p-3 rounded-xl bg-gradient-to-r from-cyan-500/10 to-pink-500/10 border border-cyan-500/20">
           <p className="text-xs text-gray-300 flex flex-wrap items-center gap-x-4 gap-y-1">
