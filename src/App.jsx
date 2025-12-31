@@ -744,7 +744,7 @@ const AchievementPanel = ({ workouts, conditioning, bodyweight }) => {
       <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/20">
         <p className="text-xs text-gray-400 mb-2">Key Lifts (1RM)</p>
         <div className="grid grid-cols-5 gap-1 text-center">
-          {[{ n: 'Inc', v: ach.lifts.incline }, { n: 'OHP', v: ach.lifts.shoulder }, { n: 'Sqt', v: ach.lifts.squat }, { n: 'Lat', v: ach.lifts.lat }, { n: 'DL', v: ach.lifts.deadlift }].map(l => <div key={l.n}><p className="text-lg font-bold text-white">{l.v}</p><p className="text-[10px] text-gray-500">{l.n}</p></div>)}
+          {[{ n: 'Inc', v: ach.lifts.incline }, { n: 'OHP', v: ach.lifts.shoulder }, { n: 'Sqt', v: ach.lifts.squat }, { n: 'Lat', v: ach.lifts.lat }, { n: 'DL', v: ach.lifts.deadlift }].map(l => <div key={l.n}><p className="text-lg font-bold text-white">{l.v}kg</p><p className="text-[10px] text-gray-500">{l.n}</p></div>)}
         </div>
       </div>
       {ach.earned.length > 0 && <div className="mb-3"><p className="text-xs text-gray-500 mb-2">EARNED</p><div className="grid grid-cols-2 gap-2">{ach.earned.slice(0, 4).map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/10"><div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${a.color}20` }}><a.icon size={14} style={{ color: a.color }} /></div><p className="text-[11px] font-medium text-white truncate">{a.title}</p></div>)}</div></div>}
@@ -1055,10 +1055,10 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                     <div key={f.name} className="p-2 rounded-lg bg-black/20">
                       <p className="text-xs text-white font-medium mb-1 truncate">{f.name}</p>
                       <div className="grid grid-cols-4 gap-1 text-center">
-                        <div><p className="text-[10px] text-gray-500">Now</p><p className="text-sm font-bold text-white">{f.current}</p></div>
-                        <div><p className="text-[10px] text-gray-500">4w</p><p className="text-sm font-bold" style={{ color: color.text }}>{f.week4}</p></div>
-                        <div><p className="text-[10px] text-gray-500">8w</p><p className="text-sm font-bold" style={{ color: color.text }}>{f.week8}</p></div>
-                        <div><p className="text-[10px] text-gray-500">12w</p><p className="text-sm font-bold" style={{ color: color.text }}>{f.week12}</p></div>
+                        <div><p className="text-[10px] text-gray-500">Now</p><p className="text-sm font-bold text-white">{f.current}kg</p></div>
+                        <div><p className="text-[10px] text-gray-500">4w</p><p className="text-sm font-bold" style={{ color: color.text }}>{f.week4}kg</p></div>
+                        <div><p className="text-[10px] text-gray-500">8w</p><p className="text-sm font-bold" style={{ color: color.text }}>{f.week8}kg</p></div>
+                        <div><p className="text-[10px] text-gray-500">12w</p><p className="text-sm font-bold" style={{ color: color.text }}>{f.week12}kg</p></div>
                       </div>
                     </div>
                   ))}
