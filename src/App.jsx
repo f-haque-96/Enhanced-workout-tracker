@@ -810,7 +810,8 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
       pc = conditioning.filter(c => { const d = new Date(c.date); return d >= prevCutoff && d < cutoff; });
     }
     if (activeTab !== 'conditioning') {
-      const filter = (l) => l.filter(w => w.exercises.some(e => categorizeExercise(e.title).category === activeTab) || w.category === activeTab);
+      // Filter workouts that have at least one exercise matching the active tab category
+      const filter = (l) => l.filter(w => w.exercises.some(e => categorizeExercise(e.title).category === activeTab));
       fw = filter(fw); pw = filter(pw);
     }
     return { filteredWorkouts: fw, previousWorkouts: pw, filteredConditioning: fc, previousConditioning: pc };

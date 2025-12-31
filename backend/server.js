@@ -98,37 +98,35 @@ const fetchHevy = async (endpoint, options = {}) => {
 
 // Helper: Transform Hevy workout to our format
 const transformWorkout = (workout) => {
-  let category = 'other';
-  const exerciseNames = workout.exercises.map(e => (e.title || '').toLowerCase()).join(' ');
-  
-  if (exerciseNames.includes('bench') || exerciseNames.includes('shoulder') || exerciseNames.includes('tricep') || exerciseNames.includes('chest') || exerciseNames.includes('fly') || exerciseNames.includes('incline') || exerciseNames.includes('press') && !exerciseNames.includes('leg')) {
-    category = 'push';
-  } else if (exerciseNames.includes('deadlift') || exerciseNames.includes('row') || exerciseNames.includes('pull') || exerciseNames.includes('curl') || exerciseNames.includes('lat') || exerciseNames.includes('back')) {
-    category = 'pull';
-  } else if (exerciseNames.includes('squat') || exerciseNames.includes('leg') || exerciseNames.includes('lunge') || exerciseNames.includes('calf') || exerciseNames.includes('hamstring')) {
-    category = 'legs';
-  }
-  
+  // Use Hevy's title if provided, otherwise use a generic "Workout" title
+  // Let frontend handle categorization based on individual exercises
+  const title = workout.title || 'Workout';
+
   return {
     id: workout.id,
-    title: workout.title || `${category.charAt(0).toUpperCase() + category.slice(1)} Day`,
-    category,
+    title: title,
+    category: 'strength', // Generic category - frontend will filter by exercise categories
     start_time: workout.start_time,
     end_time: workout.end_time,
     appleHealth: null,
     exercises: (workout.exercises || []).map(exercise => ({
       title: exercise.title,
       muscle_group: exercise.muscle_group || 'other',
-      sets: (exercise.sets || []).map(set => ({
-        // Use set_type from Hevy if provided, otherwise determine from RPE
-        // Default to 'working' if no RPE (many users don't track RPE for every set)
-        set_type: set.set_type || (set.rpe >= 10 ? 'failure' : 'working'),
-        weight_kg: set.weight_kg,
-        reps: set.reps,
-        rpe: set.rpe,
-        distance_meters: set.distance_meters,
-        duration_seconds: set.duration_seconds
-      }))
+      sets: (exercise.sets || []).map(set => {
+        // DEBUG: Log raw set data to see what Hevy provides
+        console.log('Raw Hevy set data:', JSON.stringify(set, null, 2));
+
+        return {
+          // Use set_type from Hevy if provided, otherwise determine from RPE
+          // Default to 'working' if no RPE (many users don't track RPE for every set)
+          set_type: set.set_type || (set.rpe >= 10 ? 'failure' : 'working'),
+          weight_kg: set.weight_kg,
+          reps: set.reps,
+          rpe: set.rpe,
+          distance_meters: set.distance_meters,
+          duration_seconds: set.duration_seconds
+        };
+      })
     }))
   };
 };
