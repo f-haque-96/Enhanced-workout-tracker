@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   TrendingUp, TrendingDown, Dumbbell, Heart, Footprints, 
   Flame, Clock, Calendar, ChevronDown, ChevronRight,
@@ -376,12 +377,78 @@ const generateMockData = () => {
 // ============================================
 const Tooltip = ({ children, content, position = 'top' }) => {
   const [show, setShow] = useState(false);
-  const pos = { top: 'bottom-full left-1/2 -translate-x-1/2 mb-2', bottom: 'top-full left-1/2 -translate-x-1/2 mt-2', left: 'right-full top-1/2 -translate-y-1/2 mr-2', right: 'left-full top-1/2 -translate-y-1/2 ml-2' };
+  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef(null);
+
+  const updatePosition = () => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const scrollY = window.scrollY;
+    const scrollX = window.scrollX;
+
+    let top, left;
+
+    switch (position) {
+      case 'top':
+        top = rect.top + scrollY - 8;
+        left = rect.left + scrollX + rect.width / 2;
+        break;
+      case 'bottom':
+        top = rect.bottom + scrollY + 8;
+        left = rect.left + scrollX + rect.width / 2;
+        break;
+      case 'left':
+        top = rect.top + scrollY + rect.height / 2;
+        left = rect.left + scrollX - 8;
+        break;
+      case 'right':
+        top = rect.top + scrollY + rect.height / 2;
+        left = rect.right + scrollX + 8;
+        break;
+      default:
+        top = rect.top + scrollY - 8;
+        left = rect.left + scrollX + rect.width / 2;
+    }
+
+    setCoords({ top, left });
+  };
+
+  const handleMouseEnter = () => {
+    updatePosition();
+    setShow(true);
+  };
+
+  const positionClasses = {
+    top: '-translate-x-1/2 -translate-y-full',
+    bottom: '-translate-x-1/2',
+    left: '-translate-x-full -translate-y-1/2',
+    right: '-translate-y-1/2'
+  };
+
   return (
-    <span className="relative inline-block" style={{ isolation: 'isolate' }} onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
-      {children}
-      {show && <span className={`absolute z-[9999] ${pos[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs pointer-events-none whitespace-normal`}>{content}</span>}
-    </span>
+    <>
+      <span
+        ref={triggerRef}
+        className="relative inline-block"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={() => setShow(false)}
+      >
+        {children}
+      </span>
+      {show && createPortal(
+        <div
+          className={`fixed ${positionClasses[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs whitespace-normal pointer-events-none`}
+          style={{
+            top: coords.top,
+            left: coords.left,
+            zIndex: 99999
+          }}
+        >
+          {content}
+        </div>,
+        document.body
+      )}
+    </>
   );
 };
 
