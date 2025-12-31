@@ -500,38 +500,72 @@ const generateMockData = () => {
 const Tooltip = ({ children, content, position = 'top' }) => {
   const [show, setShow] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const [adjustedPosition, setAdjustedPosition] = useState(position);
   const triggerRef = useRef(null);
 
   const handleMouseEnter = () => {
     if (!triggerRef.current) return;
 
     const rect = triggerRef.current.getBoundingClientRect();
+    const tooltipWidth = 280; // max-w-xs is roughly 280px
+    const tooltipHeight = 100; // approximate
+    const padding = 10;
 
     let top, left;
+    let finalPosition = position;
 
+    // Check if tooltip would go off screen and adjust
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // Calculate initial position
     switch (position) {
       case 'top':
-        top = rect.top - 8;
+        top = rect.top - padding;
         left = rect.left + rect.width / 2;
+        // If would go above viewport, show below instead
+        if (rect.top < tooltipHeight + padding) {
+          finalPosition = 'bottom';
+          top = rect.bottom + padding;
+        }
         break;
       case 'bottom':
-        top = rect.bottom + 8;
+        top = rect.bottom + padding;
         left = rect.left + rect.width / 2;
         break;
       case 'left':
         top = rect.top + rect.height / 2;
-        left = rect.left - 8;
+        left = rect.left - padding;
+        // If would go off left edge, show right instead
+        if (rect.left < tooltipWidth + padding) {
+          finalPosition = 'right';
+          left = rect.right + padding;
+        }
         break;
       case 'right':
         top = rect.top + rect.height / 2;
-        left = rect.right + 8;
+        left = rect.right + padding;
+        // If would go off right edge, show left instead
+        if (rect.right + tooltipWidth > viewportWidth) {
+          finalPosition = 'left';
+          left = rect.left - padding;
+        }
         break;
       default:
-        top = rect.top - 8;
+        top = rect.top - padding;
         left = rect.left + rect.width / 2;
     }
 
+    // Ensure tooltip doesn't go off left/right edges
+    const halfTooltip = tooltipWidth / 2;
+    if (left - halfTooltip < padding) {
+      left = halfTooltip + padding;
+    } else if (left + halfTooltip > viewportWidth - padding) {
+      left = viewportWidth - halfTooltip - padding;
+    }
+
     setCoords({ top, left });
+    setAdjustedPosition(finalPosition);
     setShow(true);
   };
 
@@ -549,12 +583,14 @@ const Tooltip = ({ children, content, position = 'top' }) => {
         className="inline-block"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setShow(false)}
+        onTouchStart={handleMouseEnter}
+        onTouchEnd={() => setTimeout(() => setShow(false), 2000)}
       >
         {children}
       </span>
       {show && createPortal(
         <div
-          className={`fixed ${positionClasses[position]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-xs whitespace-normal pointer-events-none`}
+          className={`fixed ${positionClasses[adjustedPosition]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-[280px] whitespace-normal pointer-events-none`}
           style={{
             top: `${coords.top}px`,
             left: `${coords.left}px`,
@@ -921,7 +957,7 @@ const AchievementPanel = ({ workouts, conditioning, bodyweight }) => {
       </div>
       <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/20">
         <p className="text-xs text-gray-400 mb-2">Key Lifts (1RM)</p>
-        <div className="grid grid-cols-5 gap-1 text-center">
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 text-center">
           {[{ n: 'Inc', v: ach.lifts.incline }, { n: 'OHP', v: ach.lifts.shoulder }, { n: 'Sqt', v: ach.lifts.squat }, { n: 'Lat', v: ach.lifts.lat }, { n: 'DL', v: ach.lifts.deadlift }].map(l => <div key={l.n}><p className="text-lg font-bold text-white">{l.v}kg</p><p className="text-[10px] text-gray-500">{l.n}</p></div>)}
         </div>
       </div>
