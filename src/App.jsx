@@ -601,8 +601,9 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
 const MeasurementsCard = ({ measurements }) => {
   const { current, starting, height } = measurements;
 
-  // Calculate BMI if we have weight and height
-  const bmi = (current.weight && height) ? (current.weight / Math.pow(height / 100, 2)).toFixed(1) : null;
+  // Calculate BMI if we have weight (use default height of 175cm if not provided)
+  const effectiveHeight = height || 175; // Default to 175cm (~5'9") if not specified
+  const bmi = current.weight ? (current.weight / Math.pow(effectiveHeight / 100, 2)).toFixed(1) : null;
   const bmiCategory = bmi ? (bmi < 18.5 ? 'Underweight' : bmi < 25 ? 'Normal' : bmi < 30 ? 'Overweight' : 'Obese') : null;
   const bmiColor = bmi ? (bmi < 18.5 ? 'yellow' : bmi < 25 ? 'green' : bmi < 30 ? 'orange' : 'red') : 'gray';
 
@@ -700,10 +701,12 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth }) => {
         if (s.rpe) { rpeT += s.rpe; rpeC++; }
         if (s.set_type === 'warmup') warm++; else if (s.set_type === 'failure') fail++; else work++;
       }));
-      if (w.appleHealth) cal += w.appleHealth.activeCalories;
+      // Add calories from Apple Health data if available
+      if (w.appleHealth?.activeCalories) cal += w.appleHealth.activeCalories;
     });
-    conditioning.slice(0, 10).forEach(c => cal += c.activeCalories);
-    return { avgRPE: rpeC > 0 ? (rpeT / rpeC).toFixed(1) : 0, warmupSets: warm, workingSets: work, failureSets: fail, weeklyCalories: cal };
+    // Conditioning sessions use 'calories' not 'activeCalories'
+    conditioning.slice(0, 10).forEach(c => cal += (c.calories || 0));
+    return { avgRPE: rpeC > 0 ? (rpeT / rpeC).toFixed(1) : 0, warmupSets: warm, workingSets: work, failureSets: fail, weeklyCalories: Math.round(cal) };
   }, [workouts, conditioning]);
 
   const recovery = Math.max(0, Math.min(100, 100 - (restDays * 15) - (stats.avgRPE * 5)));
@@ -730,7 +733,7 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth }) => {
         </Tooltip>
         <div className="p-3 rounded-xl bg-gradient-to-br from-pink-500/20 to-pink-500/5 border border-pink-500/20">
           <div className="flex items-center gap-2 mb-1"><Heart size={14} className="text-pink-400" /><span className="text-xs text-gray-400">Resting HR</span></div>
-          <span className="text-2xl font-bold text-white">{appleHealth.restingHeartRate}</span>
+          <span className="text-2xl font-bold text-white">{appleHealth?.restingHeartRate || '-'}</span>
         </div>
         <div className="p-3 rounded-xl bg-gradient-to-br from-green-500/20 to-green-500/5 border border-green-500/20">
           <div className="flex items-center gap-2 mb-1"><Flame size={14} className="text-green-400" /><span className="text-xs text-gray-400">Calories</span></div>
@@ -777,7 +780,7 @@ const AchievementPanel = ({ workouts, conditioning, bodyweight }) => {
     }));
     
     let swimD = 0, walkD = 0, cal = 0;
-    conditioning.forEach(c => { cal += c.activeCalories; if (c.category === 'swimming' && c.distance) swimD += c.distance; if (c.category === 'walking' && c.distance) walkD += c.distance; });
+    conditioning.forEach(c => { cal += (c.calories || 0); if (c.category === 'swimming' && c.distance) swimD += c.distance; if (c.category === 'walking' && c.distance) walkD += c.distance; });
     
     if (lifts.incline >= bodyweight) earned.push({ ...ACHIEVEMENTS.inclineBW }); else inProgress.push({ ...ACHIEVEMENTS.inclineBW, progress: Math.round(lifts.incline / bodyweight * 100), target: 100 });
     if (lifts.shoulder >= bodyweight * 0.7) earned.push({ ...ACHIEVEMENTS.shoulderPress0_7 }); else inProgress.push({ ...ACHIEVEMENTS.shoulderPress0_7, progress: Math.round(lifts.shoulder / (bodyweight * 0.7) * 100), target: 100 });
