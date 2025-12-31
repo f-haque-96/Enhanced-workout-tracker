@@ -707,7 +707,7 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
         <div className="flex items-center gap-2"><Trophy className="text-amber-400" size={20} /><h3 className="text-lg font-semibold text-white">Key Lifts</h3></div>
         <Tooltip content={<div className="text-left"><p className="font-medium">Your 5 Key Lifts</p><p className="text-gray-400 text-[10px]">Hover each lift for standards & targets</p></div>}><Info size={14} className="text-gray-500 cursor-help" /></Tooltip>
       </div>
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 gap-3">
         {order.map(name => {
           const d = keyLifts[name];
           if (!d) return null;
@@ -957,8 +957,16 @@ const AchievementPanel = ({ workouts, conditioning, bodyweight }) => {
       </div>
       <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 to-purple-500/10 border border-amber-500/20">
         <p className="text-xs text-gray-400 mb-2">Key Lifts (1RM)</p>
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-1 text-center">
-          {[{ n: 'Inc', v: ach.lifts.incline }, { n: 'OHP', v: ach.lifts.shoulder }, { n: 'Sqt', v: ach.lifts.squat }, { n: 'Lat', v: ach.lifts.lat }, { n: 'DL', v: ach.lifts.deadlift }].map(l => <div key={l.n}><p className="text-lg font-bold text-white">{l.v}kg</p><p className="text-[10px] text-gray-500">{l.n}</p></div>)}
+        <div className="grid grid-cols-5 gap-2 text-center">
+          {[{ n: 'Inc', v: ach.lifts.incline }, { n: 'OHP', v: ach.lifts.shoulder }, { n: 'Sqt', v: ach.lifts.squat }, { n: 'Lat', v: ach.lifts.lat }, { n: 'DL', v: ach.lifts.deadlift }].map(l => (
+            <div key={l.n} className="min-w-[50px]">
+              <div className="text-sm sm:text-lg font-bold text-white whitespace-nowrap">
+                {l.v}
+                <span className="text-[10px] text-gray-400">kg</span>
+              </div>
+              <div className="text-[9px] sm:text-[10px] text-gray-500 truncate">{l.n}</div>
+            </div>
+          ))}
         </div>
       </div>
       {ach.earned.length > 0 && <div className="mb-3"><p className="text-xs text-gray-500 mb-2">EARNED</p><div className="grid grid-cols-2 gap-2">{ach.earned.slice(0, 4).map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/10"><div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${a.color}20` }}><a.icon size={14} style={{ color: a.color }} /></div><p className="text-[11px] font-medium text-white truncate">{a.title}</p></div>)}</div></div>}
