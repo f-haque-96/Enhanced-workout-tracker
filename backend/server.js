@@ -147,8 +147,16 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Get all data
+// Get all data (with cache-busting headers for mobile)
 app.get('/api/data', (req, res) => {
+  // Prevent caching - critical for mobile Safari/Chrome
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store'
+  });
+
   const data = readData();
   if (!data) {
     return res.status(500).json({ error: 'Failed to read data' });

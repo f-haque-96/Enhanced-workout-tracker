@@ -1271,11 +1271,23 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, da
     return Math.round(withSteps.reduce((sum, s) => sum + s.steps, 0) / withSteps.length);
   }, [conditioning]);
 
-  // Calculate sleep data
-  const sleepData = useMemo(() => calculateSleepData(appleHealth), [appleHealth]);
+  // Calculate sleep data (default to 7 hours if no data available)
+  const sleepData = useMemo(() => {
+    const data = calculateSleepData(appleHealth);
+    // If no sleep data, assume 7 hours (neutral/average)
+    if (data.avgHours === 0) {
+      return {
+        ...data,
+        avgHours: 7,
+        lastNight: 7,
+        consistency: 0.8, // Assume decent consistency for neutral score
+      };
+    }
+    return data;
+  }, [appleHealth]);
 
-  // Enhanced Recovery Score with Sleep Data
-  // Components: Rest Days (40%), RPE (25%), Sleep (35%)
+  // Enhanced Recovery Score with Sleep Data + Resting HR
+  // Components: Rest Days (30%), RPE (20%), Sleep (30%), Resting HR (20%)
   const restScore = Math.min(100, restDays === 0 ? 20 : restDays === 1 ? 50 : restDays === 2 ? 75 : 100);
   const rpeScore = Math.max(0, 100 - (stats.avgRPE * 7)); // RPE 10 = 30%, RPE 0 = 100%
 
@@ -1296,11 +1308,29 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, da
   }
   const sleepScore = (sleepDurationScore * 0.7) + (sleepConsistency * 100 * 0.3);
 
+  // Resting HR score (optimal: 50-60, good: 60-70, average: 70-80, poor: 80+)
+  const restingHR = appleHealth?.restingHeartRate || 0;
+  let hrScore = 75; // Default neutral score if no HR data
+  if (restingHR > 0) {
+    if (restingHR <= 60) {
+      hrScore = 100; // Excellent
+    } else if (restingHR <= 70) {
+      hrScore = 85; // Good
+    } else if (restingHR <= 80) {
+      hrScore = 70; // Average
+    } else if (restingHR <= 90) {
+      hrScore = 50; // Below average
+    } else {
+      hrScore = 30; // Poor
+    }
+  }
+
   // Weighted final recovery score
   const recovery = Math.round(
-    (restScore * 0.40) +
-    (rpeScore * 0.25) +
-    (sleepScore * 0.35)
+    (restScore * 0.30) +
+    (rpeScore * 0.20) +
+    (sleepScore * 0.30) +
+    (hrScore * 0.20)
   );
 
   const recStatus = recovery >= 75 ? 'ready' : recovery >= 50 ? 'moderate' : 'fatigued';
@@ -1456,7 +1486,7 @@ const AchievementPanel = ({ workouts, conditioning, bodyweight }) => {
               ))}
             </div>
           </div>
-          {ach.earned.length > 0 && <div className="mb-3"><p className="text-xs text-gray-500 mb-2">EARNED</p><div className="grid grid-cols-2 gap-2">{ach.earned.slice(0, 4).map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/10"><div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${a.color}20` }}><a.icon size={14} style={{ color: a.color }} /></div><p className="text-[11px] font-medium text-white truncate">{a.title}</p></div>)}</div></div>}
+          {ach.earned.length > 0 && <div className="mb-3"><p className="text-xs text-gray-500 mb-2">EARNED (Latest 3)</p><div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{ach.earned.slice(-3).reverse().map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/10"><div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${a.color}20` }}><a.icon size={14} style={{ color: a.color }} /></div><p className="text-[11px] font-medium text-white truncate">{a.title}</p></div>)}</div></div>}
           <div><p className="text-xs text-gray-500 mb-2">IN PROGRESS</p><div className="space-y-2">{ach.inProgress.slice(0, 3).map((a, i) => <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-white/5"><div className="w-7 h-7 rounded-lg flex items-center justify-center bg-white/10"><a.icon size={14} className="text-gray-400" /></div><div className="flex-1"><div className="flex items-center justify-between mb-1"><p className="text-[11px] font-medium text-white">{a.title}</p><p className="text-[10px] text-gray-400">{a.progress}{a.unit || ''}/{a.target}{a.unit || ''}</p></div><ProgressBar value={parseFloat(a.progress)} max={a.target} color={a.color} height={3} /></div></div>)}</div></div>
         </>
       )}
@@ -2443,25 +2473,76 @@ const App = () => {
       setLoading(true);
 
       try {
-        // Try to fetch from API (real Hevy data)
-        const res = await fetch(`${API_BASE_URL}/data`);
+        // Add timestamp for cache busting
+        const timestamp = Date.now();
+        const isMobile = window.innerWidth < 768;
+
+        console.log('=== DATA LOAD START ===');
+        console.log('Device type:', isMobile ? 'MOBILE' : 'DESKTOP');
+        console.log('API URL:', `${API_BASE_URL}/data?_t=${timestamp}`);
+        console.log('User Agent:', navigator.userAgent);
+
+        // Try to fetch from API with cache busting
+        const res = await fetch(`${API_BASE_URL}/data?_t=${timestamp}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        });
+
+        console.log('API Response Status:', res.status);
+
         if (res.ok) {
           const apiData = await res.json();
+
+          // DETAILED MOBILE DEBUGGING
+          console.log('=== RAW API DATA ===');
+          console.log('Workouts count:', apiData.workouts?.length || 0);
+          console.log('Conditioning count:', apiData.conditioning?.length || 0);
+          console.log('Apple Health:', apiData.appleHealth);
+          console.log('Measurements:', apiData.measurements);
+
+          if (apiData.conditioning && apiData.conditioning.length > 0) {
+            console.log('First conditioning session:', apiData.conditioning[0]);
+            console.log('Last conditioning session:', apiData.conditioning[apiData.conditioning.length - 1]);
+          } else {
+            console.warn('⚠️ NO CONDITIONING DATA IN API RESPONSE!');
+          }
+
           // NORMALIZE the data before using it
           const normalizedData = normalizeApiData(apiData);
+
+          console.log('=== NORMALIZED DATA ===');
+          console.log('Normalized workouts:', normalizedData.workouts?.length || 0);
+          console.log('Normalized conditioning:', normalizedData.conditioning?.length || 0);
+
+          if (normalizedData.conditioning && normalizedData.conditioning.length > 0) {
+            console.log('First normalized conditioning:', normalizedData.conditioning[0]);
+          } else {
+            console.error('❌ CONDITIONING DATA LOST DURING NORMALIZATION!');
+          }
+
           if (normalizedData && (normalizedData.workouts.length > 0 || normalizedData.conditioning.length > 0)) {
             setData(normalizedData);
-            console.log('✅ Loaded and normalized API data:', normalizedData);
+            console.log('✅ Data successfully loaded and set in state');
+            console.log('Final conditioning in state:', normalizedData.conditioning?.length || 0);
             setLastUpdated(new Date(normalizedData.lastSync || Date.now()));
             setLoading(false);
             return;
+          } else {
+            console.error('❌ No valid data after normalization');
           }
+        } else {
+          console.error('API response not OK:', res.status, res.statusText);
         }
       } catch (error) {
-        console.log('API not available, using mock data:', error);
+        console.error('❌ API load error:', error);
+        console.error('Error stack:', error.stack);
       }
 
       // Fall back to mock data
+      console.warn('⚠️ Falling back to mock data');
       await new Promise(r => setTimeout(r, 500));
       setData(generateMockData());
       console.log('📊 Using mock data (API not connected)');
