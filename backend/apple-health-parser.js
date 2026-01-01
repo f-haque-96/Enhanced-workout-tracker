@@ -21,6 +21,7 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
       restingHRRecords: [],
       leanMassRecords: [],
       dietaryCalorieRecords: [],
+      waistRecords: [],
       stats: {
         linesProcessed: 0,
         workoutsFound: 0,
@@ -28,7 +29,8 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
         bodyFatRecordsFound: 0,
         restingHRRecordsFound: 0,
         leanMassRecordsFound: 0,
-        dietaryCaloriesFound: 0
+        dietaryCaloriesFound: 0,
+        waistRecordsFound: 0
       }
     };
 
@@ -124,6 +126,17 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
           results.stats.dietaryCaloriesFound++;
         }
       }
+
+      // ==========================================
+      // WAIST CIRCUMFERENCE (single line)
+      // ==========================================
+      if (line.includes('HKQuantityTypeIdentifierWaistCircumference') && line.includes('value=')) {
+        const record = parseHealthRecord(line, 'waist');
+        if (record) {
+          results.waistRecords.push(record);
+          results.stats.waistRecordsFound++;
+        }
+      }
     });
 
     rl.on('close', () => {
@@ -134,6 +147,7 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
       results.restingHRRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
       results.leanMassRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
       results.dietaryCalorieRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+      results.waistRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
 
       resolve(results);
     });
@@ -317,10 +331,16 @@ function parseHealthRecord(line, type) {
     if (!valueMatch || !dateMatch) return null;
 
     let value = parseFloat(valueMatch[1]);
-    
+    const unit = unitMatch ? unitMatch[1] : null;
+
     // Convert body fat from decimal to percentage if needed
     if (type === 'bodyFat' && value < 1) {
       value = value * 100;
+    }
+
+    // Convert waist from cm to inches (Apple Health stores in cm)
+    if (type === 'waist' && unit === 'cm') {
+      value = value / 2.54; // cm to inches
     }
 
     return {
@@ -388,6 +408,11 @@ function processAppleHealthData(parsedData, existingData) {
   // Get latest body fat
   if (parsedData.bodyFatRecords.length > 0) {
     result.latestBodyFat = parsedData.bodyFatRecords[0].value;
+  }
+
+  // Get latest waist circumference (converted from cm to inches)
+  if (parsedData.waistRecords.length > 0) {
+    result.latestWaist = parsedData.waistRecords[0].value;
   }
 
   // Calculate average resting HR (last 30 days)

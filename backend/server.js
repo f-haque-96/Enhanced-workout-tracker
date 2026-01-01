@@ -418,7 +418,8 @@ function processAppleHealthData(parsedData) {
     weightHistory.push(...last90Days.map(record => ({
       date: record.date.split('T')[0].split(' ')[0],
       weight: record.value,
-      bodyFat: null // Will be filled if bodyFat exists for same date
+      bodyFat: null, // Will be filled if bodyFat exists for same date
+      waist: null // Will be filled if waist exists for same date
     })));
   }
 
@@ -429,6 +430,17 @@ function processAppleHealthData(parsedData) {
       const weightEntry = weightHistory.find(w => w.date === dateKey);
       if (weightEntry) {
         weightEntry.bodyFat = bfRecord.value;
+      }
+    });
+  }
+
+  // Add waist to weight history where available
+  if (parsedData.waistRecords && parsedData.waistRecords.length > 0) {
+    parsedData.waistRecords.forEach(waistRecord => {
+      const dateKey = waistRecord.date.split('T')[0].split(' ')[0];
+      const weightEntry = weightHistory.find(w => w.date === dateKey);
+      if (weightEntry) {
+        weightEntry.waist = waistRecord.value;
       }
     });
   }
@@ -950,6 +962,31 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
       // Mark Apple Health as source for body fat
       data.measurements.sources = data.measurements.sources || {};
       data.measurements.sources.bodyFat = 'Apple Health';
+    }
+
+    // Update waist circumference - get oldest and newest from parsed data
+    if (parsedData.waistRecords && parsedData.waistRecords.length > 0) {
+      const sorted = parsedData.waistRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
+      const startingWaist = sorted[0].value;
+      const currentWaist = sorted[sorted.length - 1].value;
+
+      // Preserve all existing measurements
+      if (startingWaist) {
+        data.measurements.starting = {
+          ...data.measurements.starting,
+          waist: Math.round(startingWaist * 10) / 10
+        };
+      }
+      if (currentWaist) {
+        data.measurements.current = {
+          ...data.measurements.current,
+          waist: Math.round(currentWaist * 10) / 10
+        };
+      }
+
+      // Mark Apple Health as source for waist
+      data.measurements.sources = data.measurements.sources || {};
+      data.measurements.sources.waist = 'Apple Health';
     }
 
     // Update lean body mass if available
