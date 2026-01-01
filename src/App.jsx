@@ -328,6 +328,7 @@ const formatDateShort = (date) => new Date(date).toLocaleDateString('en-GB', { d
 const formatDuration = (seconds) => { const hrs = Math.floor(seconds / 3600); const mins = Math.floor((seconds % 3600) / 60); return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`; };
 const formatPace = (seconds) => { if (!seconds) return '--:--'; const mins = Math.floor(seconds / 60); const secs = Math.round(seconds % 60); return `${mins}:${secs.toString().padStart(2, '0')}`; };
 const formatSteps = (steps) => { if (!steps || steps === 0) return '0'; if (steps >= 1000) { const k = steps / 1000; return k % 1 === 0 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`; } return Math.round(steps).toString(); };
+const formatDistance = (meters) => { if (!meters || meters === 0) return null; const miles = meters / 1609.34; if (miles >= 10) return `${Math.round(miles)} mi`; if (miles >= 1) return `${miles.toFixed(1)} mi`; return `${miles.toFixed(2)} mi`; };
 const estimateSteps = (distanceMeters) => distanceMeters > 0 ? Math.round((distanceMeters / 1000) * 1300) : 0; // ~1300 steps per km
 const daysSince = (date) => Math.floor((new Date() - new Date(date)) / (1000 * 60 * 60 * 24));
 const kgToLbs = (kg) => Math.round(kg * 2.20462);
@@ -765,16 +766,15 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
 // ============================================
 // MEASUREMENTS CARD
 // ============================================
-// WEIGHT TREND SPARKLINE
+// WEIGHT TREND CARD
 // ============================================
-const WeightSparkline = ({ history, days = 30 }) => {
+const WeightTrendCard = ({ history }) => {
   if (!history || history.length < 2) return null;
 
-  // Get last N days of weight data
   const weightData = history
     .filter(h => h.weight && h.weight > 0)
-    .slice(0, days)
-    .reverse(); // Oldest first for left-to-right
+    .slice(0, 30)
+    .reverse();
 
   if (weightData.length < 2) return null;
 
@@ -782,13 +782,14 @@ const WeightSparkline = ({ history, days = 30 }) => {
   const min = Math.min(...weights);
   const max = Math.max(...weights);
   const range = max - min || 1;
+  const latest = weights[weights.length - 1];
+  const first = weights[0];
+  const change = latest - first;
 
-  // SVG dimensions
-  const width = 200;
-  const height = 40;
-  const padding = 4;
+  const width = 280;
+  const height = 60;
+  const padding = 8;
 
-  // Generate path
   const points = weights.map((w, i) => {
     const x = padding + (i / (weights.length - 1)) * (width - padding * 2);
     const y = height - padding - ((w - min) / range) * (height - padding * 2);
@@ -796,25 +797,26 @@ const WeightSparkline = ({ history, days = 30 }) => {
   });
 
   const pathD = `M ${points.join(' L ')}`;
-
-  // Trend direction
-  const trend = weights[weights.length - 1] - weights[0];
-  const trendColor = trend > 0 ? '#22c55e' : trend < 0 ? '#ef4444' : '#94a3b8';
+  const trendColor = change > 0 ? '#22c55e' : change < 0 ? '#ef4444' : '#94a3b8';
 
   return (
-    <div className="mt-3">
-      <div className="text-xs text-slate-500 mb-1">Weight Trend ({days}d)</div>
+    <div className="card h-full">
+      <div className="flex items-center gap-2 mb-3">
+        <TrendingUp className="text-blue-400" size={16} />
+        <h3 className="text-sm font-semibold text-white">Weight Trend</h3>
+        <span className="text-xs text-slate-500 ml-auto">Last 30 days</span>
+      </div>
       <svg width={width} height={height} className="w-full">
-        {/* Grid lines */}
         <line x1={padding} y1={height/2} x2={width-padding} y2={height/2} stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
-        {/* Trend line */}
-        <path d={pathD} fill="none" stroke={trendColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-        {/* End dot */}
-        <circle cx={points[points.length-1]?.split(',')[0]} cy={points[points.length-1]?.split(',')[1]} r="3" fill={trendColor}/>
+        <path d={pathD} fill="none" stroke={trendColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <circle cx={parseFloat(points[points.length-1]?.split(',')[0])} cy={parseFloat(points[points.length-1]?.split(',')[1])} r="4" fill={trendColor}/>
       </svg>
-      <div className="flex justify-between text-[10px] text-slate-500">
-        <span>{min.toFixed(1)}kg</span>
-        <span>{max.toFixed(1)}kg</span>
+      <div className="flex justify-between text-xs text-slate-500 mt-1">
+        <span>{min.toFixed(1)} kg</span>
+        <span className={`font-medium ${change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+          {change > 0 ? '+' : ''}{change.toFixed(1)} kg
+        </span>
+        <span>{max.toFixed(1)} kg</span>
       </div>
     </div>
   );
@@ -863,7 +865,6 @@ const MeasurementsCard = ({ measurements }) => {
                 {calcChange(weight, starting.weight) > 0 ? '+' : ''}{calcChange(weight, starting.weight)}%
               </div>
             )}
-            <WeightSparkline history={measurements?.history} days={30} />
           </div>
           <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-4 border border-purple-500/20">
             <div className="text-xs text-purple-300 mb-1">Body Fat</div>
@@ -955,12 +956,12 @@ const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
         {consumedCalories > 0 && (
           <div className="flex justify-between">
             <span className="text-slate-400">Consumed</span>
-            <span className="text-green-400">{consumedCalories.toLocaleString()} kcal</span>
+            <span className="text-green-400">{Math.round(consumedCalories).toLocaleString()} kcal</span>
           </div>
         )}
         <div className="flex justify-between">
           <span className="text-slate-400">Burned (exercise)</span>
-          <span className="text-red-400">{burnedCalories.toLocaleString()} kcal</span>
+          <span className="text-red-400">{Math.round(burnedCalories).toLocaleString()} kcal</span>
         </div>
 
         {consumedCalories > 0 && (
@@ -969,7 +970,7 @@ const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
             <div className="flex justify-between font-medium">
               <span className="text-slate-300">Balance</span>
               <span className={balance < 0 ? 'text-red-400' : 'text-green-400'}>
-                {balance > 0 ? '+' : ''}{balance.toLocaleString()} kcal
+                {balance > 0 ? '+' : ''}{Math.round(balance).toLocaleString()} kcal
               </span>
             </div>
             <div className="flex justify-between text-xs">
@@ -1351,7 +1352,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                   { l: 'Avg HR', v: `${cur.avgHR} bpm`, p: prev.avgHR },
                   { l: 'Max HR', v: `${cur.maxHR} bpm`, p: prev.maxHR, hl: true },
                   { l: 'Calories', v: cur.totalCalories, p: prev.totalCalories },
-                  { l: 'Distance', v: `${Math.round(cur.totalDistance * 0.621371)} mi`, p: parseFloat(prev.totalDistance || 0) * 0.621371 },
+                  { l: 'Distance', v: formatDistance(cur.totalDistance) || '0 mi', p: prev.totalDistance ? prev.totalDistance / 1609.34 : 0 },
                   { l: 'Avg Steps', v: formatSteps(cur.avgSteps), p: prev.avgSteps },
                 ].map((s, i) => {
                   const n = typeof s.v === 'string' ? parseFloat(s.v) : s.v;
@@ -1538,11 +1539,11 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                       <p className="text-xs text-gray-400">{formatDate(s.date)} • <span className="text-pink-400">Apple Health</span></p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+                  <div className="flex flex-wrap justify-center gap-4 text-center">
                     <div><p className="text-xs text-gray-500">Duration</p><p className="text-sm font-bold text-white">{formatDuration(s.duration)}</p></div>
                     {s.avgHeartRate > 0 && <div><p className="text-xs text-gray-500">Avg HR</p><p className="text-sm font-bold text-white">{s.avgHeartRate}</p></div>}
                     {s.activeCalories > 0 && <div><p className="text-xs text-gray-500">Calories</p><p className="text-sm font-bold text-white">{s.activeCalories}</p></div>}
-                    {s.distance > 0 && <div><p className="text-xs text-gray-500">Distance</p><p className="text-sm font-bold text-white">{Math.round(s.distance * 0.621371)} mi</p></div>}
+                    {s.distance > 0 && <div><p className="text-xs text-gray-500">Distance</p><p className="text-sm font-bold text-white">{formatDistance(s.distance)}</p></div>}
                     {(s.category === 'walking' || s.category === 'running') && s.distance > 0 && <div><p className="text-xs text-gray-500">Steps</p><p className="text-sm font-bold text-white">{formatSteps(estimateSteps(s.distance))}</p></div>}
                   </div>
                 </div>
@@ -1927,7 +1928,12 @@ const App = () => {
           <MeasurementsCard measurements={data.measurements} />
           <WeeklyInsightsCard workouts={data.workouts} conditioning={data.conditioning} appleHealth={data.appleHealth} nutrition={data.nutrition} dateRange={dateRange} />
         </section>
-        
+
+        {/* Weight Trend Card - Separate Row */}
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+          <WeightTrendCard history={data.measurements?.history} />
+        </section>
+
         {/* Analytics + Logs */}
         <section>
           <WorkoutAnalyticsSection workouts={data.workouts} conditioning={data.conditioning} dateRange={dateRange} setDateRange={setDateRange} />
