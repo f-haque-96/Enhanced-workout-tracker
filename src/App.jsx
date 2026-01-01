@@ -505,101 +505,93 @@ const generateMockData = () => {
 const Tooltip = ({ children, content, position = 'top' }) => {
   const [show, setShow] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
-  const [adjustedPosition, setAdjustedPosition] = useState(position);
   const triggerRef = useRef(null);
+  const tooltipRef = useRef(null);
 
   const handleMouseEnter = () => {
     if (!triggerRef.current) return;
 
     const rect = triggerRef.current.getBoundingClientRect();
-    const tooltipWidth = 280; // max-w-xs is roughly 280px
-    const tooltipHeight = 100; // approximate
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const tooltipWidth = Math.min(250, viewportWidth - 20); // Max 250px or viewport - 20px
+    const tooltipHeight = 120; // Approximate
     const padding = 10;
 
     let top, left;
-    let finalPosition = position;
 
-    // Check if tooltip would go off screen and adjust
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
+    // Calculate position
+    if (position === 'top' || position === 'bottom') {
+      left = rect.left + rect.width / 2;
 
-    // Calculate initial position
-    switch (position) {
-      case 'top':
+      // Adjust if would go off screen
+      if (left - tooltipWidth / 2 < padding) {
+        left = tooltipWidth / 2 + padding;
+      } else if (left + tooltipWidth / 2 > viewportWidth - padding) {
+        left = viewportWidth - tooltipWidth / 2 - padding;
+      }
+
+      if (position === 'top') {
         top = rect.top - padding;
-        left = rect.left + rect.width / 2;
-        // If would go above viewport, show below instead
+        // If not enough room above, show below
         if (rect.top < tooltipHeight + padding) {
-          finalPosition = 'bottom';
           top = rect.bottom + padding;
         }
-        break;
-      case 'bottom':
+      } else {
         top = rect.bottom + padding;
-        left = rect.left + rect.width / 2;
-        break;
-      case 'left':
-        top = rect.top + rect.height / 2;
-        left = rect.left - padding;
-        // If would go off left edge, show right instead
-        if (rect.left < tooltipWidth + padding) {
-          finalPosition = 'right';
-          left = rect.right + padding;
-        }
-        break;
-      case 'right':
-        top = rect.top + rect.height / 2;
+      }
+    } else {
+      // Left/right positioning
+      top = rect.top + rect.height / 2;
+
+      if (position === 'right') {
         left = rect.right + padding;
         // If would go off right edge, show left instead
-        if (rect.right + tooltipWidth > viewportWidth) {
-          finalPosition = 'left';
+        if (left + tooltipWidth > viewportWidth - padding) {
           left = rect.left - padding;
         }
-        break;
-      default:
-        top = rect.top - padding;
-        left = rect.left + rect.width / 2;
+      } else {
+        left = rect.left - padding;
+        // If would go off left edge, show right instead
+        if (left - tooltipWidth < padding) {
+          left = rect.right + padding;
+        }
+      }
     }
 
-    // Ensure tooltip doesn't go off left/right edges
-    const halfTooltip = tooltipWidth / 2;
-    if (left - halfTooltip < padding) {
-      left = halfTooltip + padding;
-    } else if (left + halfTooltip > viewportWidth - padding) {
-      left = viewportWidth - halfTooltip - padding;
+    // Ensure top doesn't go off screen
+    if (top < padding) top = padding;
+    if (top + tooltipHeight > viewportHeight - padding) {
+      top = viewportHeight - tooltipHeight - padding;
     }
 
     setCoords({ top, left });
-    setAdjustedPosition(finalPosition);
     setShow(true);
-  };
-
-  const positionClasses = {
-    top: '-translate-x-1/2 -translate-y-full',
-    bottom: '-translate-x-1/2',
-    left: '-translate-x-full -translate-y-1/2',
-    right: '-translate-y-1/2'
   };
 
   return (
     <>
       <span
         ref={triggerRef}
-        className="inline-block"
+        className="inline-block cursor-help"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setShow(false)}
-        onTouchStart={handleMouseEnter}
-        onTouchEnd={() => setTimeout(() => setShow(false), 2000)}
+        onTouchStart={(e) => { e.preventDefault(); handleMouseEnter(); }}
+        onTouchEnd={() => setTimeout(() => setShow(false), 3000)}
       >
         {children}
       </span>
       {show && createPortal(
         <div
-          className={`fixed ${positionClasses[adjustedPosition]} px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl max-w-[280px] whitespace-normal pointer-events-none`}
+          ref={tooltipRef}
+          className="fixed px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl pointer-events-none"
           style={{
             top: `${coords.top}px`,
             left: `${coords.left}px`,
-            zIndex: 99999
+            transform: 'translate(-50%, -100%)',
+            maxWidth: 'calc(100vw - 20px)',
+            width: '250px',
+            zIndex: 99999,
           }}
         >
           {content}
@@ -766,14 +758,64 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
 // ============================================
 // MEASUREMENTS CARD
 // ============================================
+// Weight Trend Section Component
+const WeightTrendSection = ({ weightData, trendChange }) => {
+  const weights = weightData.map(d => d.weight);
+  const min = Math.min(...weights);
+  const max = Math.max(...weights);
+  const range = max - min || 1;
+
+  // Determine if trend is good or bad (assuming cutting goal - weight loss is good)
+  const isGoodTrend = trendChange < 0; // For cutting: losing weight is good
+  const borderColor = isGoodTrend ? 'border-green-500/30' : 'border-red-500/30';
+  const bgColor = isGoodTrend ? 'from-green-500/10 to-green-600/5' : 'from-red-500/10 to-red-600/5';
+  const lineColor = isGoodTrend ? '#22c55e' : '#ef4444';
+
+  const width = 280;
+  const height = 50;
+  const padding = 8;
+
+  const points = weights.map((w, i) => {
+    const x = padding + (i / (weights.length - 1)) * (width - padding * 2);
+    const y = height - padding - ((w - min) / range) * (height - padding * 2);
+    return `${x},${y}`;
+  });
+
+  const pathD = `M ${points.join(' L ')}`;
+
+  return (
+    <div className={`bg-gradient-to-br ${bgColor} rounded-xl p-4 border ${borderColor}`}>
+      <div className="flex justify-between items-center mb-2">
+        <div className="text-xs text-slate-400">Weight Trend (30d)</div>
+        <div className={`text-sm font-medium ${isGoodTrend ? 'text-green-400' : 'text-red-400'}`}>
+          {trendChange > 0 ? '+' : ''}{trendChange.toFixed(1)} kg
+        </div>
+      </div>
+      <svg width={width} height={height} className="w-full">
+        <line x1={padding} y1={height/2} x2={width-padding} y2={height/2} stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
+        <path d={pathD} fill="none" stroke={lineColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <circle cx={parseFloat(points[points.length-1]?.split(',')[0]) || 0} cy={parseFloat(points[points.length-1]?.split(',')[1]) || 0} r="4" fill={lineColor}/>
+      </svg>
+      <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+        <span>{min.toFixed(1)} kg</span>
+        <span>{max.toFixed(1)} kg</span>
+      </div>
+    </div>
+  );
+};
+
 const MeasurementsCard = ({ measurements }) => {
   const current = measurements?.current || {};
   const starting = measurements?.starting || {};
+  const history = measurements?.history || [];
 
   const weight = current.weight || 0;
   const bodyFat = current.bodyFat || 0;
   const waist = current.waist || 0;
-  const height = 1.75; // Your height in meters (adjust if needed)
+  const chest = current.chest || 0;
+  const shoulders = current.shoulders || 0;
+
+  const height = 1.75; // meters - adjust as needed
   const bmi = weight > 0 ? (weight / (height * height)).toFixed(1) : null;
 
   const getBmiCategory = (bmi) => {
@@ -786,10 +828,24 @@ const MeasurementsCard = ({ measurements }) => {
 
   const bmiInfo = getBmiCategory(parseFloat(bmi));
 
+  // Calculate percentage change
   const calcChange = (current, starting) => {
     if (!current || !starting || starting === 0) return null;
-    return (((current - starting) / starting) * 100).toFixed(1);
+    return ((current - starting) / starting) * 100;
   };
+
+  // For waist: decrease is good (green), increase is bad (red)
+  // For chest/shoulders: increase is good (green), decrease is bad (red)
+  const waistChange = calcChange(waist, starting.waist);
+  const chestChange = calcChange(chest, starting.chest);
+  const shouldersChange = calcChange(shoulders, starting.shoulders);
+  const bodyFatChange = calcChange(bodyFat, starting.bodyFat);
+  const weightChange = calcChange(weight, starting.weight);
+
+  // Weight trend calculation
+  const weightData = history.filter(h => h.weight && h.weight > 0).slice(0, 30).reverse();
+  const hasWeightTrend = weightData.length >= 2;
+  const weightTrendChange = hasWeightTrend ? weightData[weightData.length - 1].weight - weightData[0].weight : 0;
 
   return (
     <div className="card h-full">
@@ -798,99 +854,95 @@ const MeasurementsCard = ({ measurements }) => {
         <h3 className="text-lg font-semibold text-white">Body Composition</h3>
       </div>
       <div className="space-y-4">
-        {/* Weight & Body Fat */}
+
+        {/* Row 1: Weight + Measurements */}
         <div className="grid grid-cols-2 gap-3">
+          {/* Weight Card - Blue */}
           <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl p-4 border border-blue-500/20">
             <div className="text-xs text-blue-300 mb-1">Weight</div>
             <div className="text-2xl font-bold">{weight}<span className="text-sm text-slate-400 ml-1">kg</span></div>
-            {calcChange(weight, starting.weight) && (
-              <div className={`text-xs mt-1 ${parseFloat(calcChange(weight, starting.weight)) > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {calcChange(weight, starting.weight) > 0 ? '+' : ''}{calcChange(weight, starting.weight)}%
+            {weightChange !== null && (
+              <div className={`text-xs mt-1 ${weightChange > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1)}%
               </div>
             )}
           </div>
-          <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-4 border border-purple-500/20">
-            <div className="text-xs text-purple-300 mb-1">Body Fat</div>
-            <div className="text-2xl font-bold">{bodyFat}<span className="text-sm text-slate-400 ml-1">%</span></div>
-            {calcChange(bodyFat, starting.bodyFat) && (
-              <div className={`text-xs mt-1 ${parseFloat(calcChange(bodyFat, starting.bodyFat)) < 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {calcChange(bodyFat, starting.bodyFat) > 0 ? '+' : ''}{calcChange(bodyFat, starting.bodyFat)}%
-              </div>
-            )}
-          </div>
-        </div>
 
-        {/* BMI */}
-        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-          <div className="flex justify-between items-center">
-            <div className="text-sm text-slate-400">BMI</div>
-            <div className={`text-sm ${bmiInfo.color}`}>{bmiInfo.label}</div>
-          </div>
-          <div className="text-2xl font-bold mt-1">{bmi || 'No data'}</div>
-
-          {/* Weight Trend - Inside BMI section */}
-          {(() => {
-            const history = measurements?.history;
-            if (!history || history.length < 2) return null;
-
-            const weightData = history
-              .filter(h => h.weight && h.weight > 0)
-              .slice(0, 30)
-              .reverse();
-
-            if (weightData.length < 2) return null;
-
-            const weights = weightData.map(d => d.weight);
-            const min = Math.min(...weights);
-            const max = Math.max(...weights);
-            const range = max - min || 1;
-            const latest = weights[weights.length - 1];
-            const first = weights[0];
-            const change = latest - first;
-
-            const width = 280;
-            const height = 50;
-            const padding = 8;
-
-            const points = weights.map((w, i) => {
-              const x = padding + (i / (weights.length - 1)) * (width - padding * 2);
-              const y = height - padding - ((w - min) / range) * (height - padding * 2);
-              return `${x},${y}`;
-            });
-
-            const pathD = `M ${points.join(' L ')}`;
-            const trendColor = change > 0 ? '#22c55e' : change < 0 ? '#ef4444' : '#94a3b8';
-
-            return (
-              <div className="mt-4 pt-4 border-t border-slate-700/50">
-                <div className="flex items-center gap-2 mb-2">
-                  <TrendingUp className="text-blue-400" size={14} />
-                  <span className="text-xs text-slate-400">Weight Trend (30d)</span>
-                </div>
-                <svg width={width} height={height} className="w-full">
-                  <line x1={padding} y1={height/2} x2={width-padding} y2={height/2} stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
-                  <path d={pathD} fill="none" stroke={trendColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <circle cx={parseFloat(points[points.length-1]?.split(',')[0])} cy={parseFloat(points[points.length-1]?.split(',')[1])} r="3" fill={trendColor}/>
-                </svg>
-                <div className="flex justify-between text-xs text-slate-500 mt-1">
-                  <span>{min.toFixed(1)} kg</span>
-                  <span className={`font-medium ${change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>
-                    {change > 0 ? '+' : ''}{change.toFixed(1)} kg
+          {/* Measurements Card - Slate */}
+          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+            <div className="text-xs text-slate-400 mb-2">Measurements</div>
+            <div className="space-y-1 text-sm">
+              {waist > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Waist</span>
+                  <span className="flex items-center gap-1">
+                    {waist}"
+                    {waistChange !== null && (
+                      <span className={`text-xs ${waistChange < 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {waistChange > 0 ? '↑' : '↓'}{Math.abs(waistChange).toFixed(1)}%
+                      </span>
+                    )}
                   </span>
-                  <span>{max.toFixed(1)} kg</span>
                 </div>
-              </div>
-            );
-          })()}
+              )}
+              {chest > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Chest</span>
+                  <span className="flex items-center gap-1">
+                    {chest}"
+                    {chestChange !== null && (
+                      <span className={`text-xs ${chestChange > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {chestChange > 0 ? '↑' : '↓'}{Math.abs(chestChange).toFixed(1)}%
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+              {shoulders > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Shoulders</span>
+                  <span className="flex items-center gap-1">
+                    {shoulders}"
+                    {shouldersChange !== null && (
+                      <span className={`text-xs ${shouldersChange > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {shouldersChange > 0 ? '↑' : '↓'}{Math.abs(shouldersChange).toFixed(1)}%
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+              {!waist && !chest && !shoulders && (
+                <span className="text-slate-500 text-xs">No data</span>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Waist */}
-        {waist > 0 && (
-          <div className="flex justify-between items-center py-2 border-t border-slate-700/50">
-            <span className="text-slate-400">Waist</span>
-            <span className="font-semibold">{waist}"</span>
+        {/* Row 2: BMI + Body Fat - Purple Card */}
+        <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-4 border border-purple-500/20">
+          <div className="flex justify-between items-start">
+            <div>
+              <div className="text-xs text-purple-300 mb-1">BMI</div>
+              <div className="text-2xl font-bold">{bmi || '--'}</div>
+              <div className={`text-xs ${bmiInfo.color}`}>{bmiInfo.label}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-purple-300 mb-1">Body Fat</div>
+              <div className="text-2xl font-bold">{bodyFat || '--'}<span className="text-sm text-slate-400">%</span></div>
+              {bodyFatChange !== null && (
+                <div className={`text-xs ${bodyFatChange < 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {bodyFatChange > 0 ? '+' : ''}{bodyFatChange.toFixed(1)}%
+                </div>
+              )}
+            </div>
           </div>
+        </div>
+
+        {/* Row 3: Weight Trend - Color coded based on trend */}
+        {hasWeightTrend && (
+          <WeightTrendSection weightData={weightData} trendChange={weightTrendChange} />
         )}
+
       </div>
     </div>
   );
@@ -1022,19 +1074,23 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, da
   const restDays = lastDate ? daysSince(lastDate) : 0;
   
   const stats = useMemo(() => {
-    let rpeT = 0, rpeC = 0, warm = 0, work = 0, fail = 0, cal = 0;
+    let rpeT = 0, rpeC = 0, warm = 0, work = 0, fail = 0;
     workouts.slice(0, 10).forEach(w => {
       w.exercises.forEach(e => e.sets.forEach(s => {
         if (s.rpe) { rpeT += s.rpe; rpeC++; }
         if (s.set_type === 'warmup') warm++; else if (s.set_type === 'failure') fail++; else work++;
       }));
-      // Add calories from Apple Health data if available
-      if (w.appleHealth?.activeCalories) cal += w.appleHealth.activeCalories;
     });
-    // Conditioning sessions use 'calories' not 'activeCalories'
-    conditioning.slice(0, 10).forEach(c => cal += (c.calories || 0));
-    return { avgRPE: rpeC > 0 ? (rpeT / rpeC).toFixed(1) : 0, warmupSets: warm, workingSets: work, failureSets: fail, weeklyCalories: Math.round(cal) };
-  }, [workouts, conditioning]);
+    return { avgRPE: rpeC > 0 ? (rpeT / rpeC).toFixed(1) : 0, warmupSets: warm, workingSets: work, failureSets: fail };
+  }, [workouts]);
+
+  // Calculate Avg Steps from conditioning data
+  const avgSteps = useMemo(() => {
+    const sessions = conditioning || [];
+    const withSteps = sessions.filter(s => s.steps && s.steps > 0);
+    if (withSteps.length === 0) return 0;
+    return Math.round(withSteps.reduce((sum, s) => sum + s.steps, 0) / withSteps.length);
+  }, [conditioning]);
 
   // Recovery score: increases with rest days, decreases with high RPE
   // Rest days: 0-3 days (3 days = full recovery)
@@ -1068,8 +1124,8 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, da
           <span className="text-2xl font-bold text-white">{appleHealth?.restingHeartRate || '-'}</span>
         </div>
         <div className="p-3 rounded-xl bg-gradient-to-br from-green-500/20 to-green-500/5 border border-green-500/20">
-          <div className="flex items-center gap-2 mb-1"><Flame size={14} className="text-green-400" /><span className="text-xs text-gray-400">Calories</span></div>
-          <span className="text-2xl font-bold text-white">{stats.weeklyCalories}</span>
+          <div className="flex items-center gap-2 mb-1"><Footprints size={14} className="text-green-400" /><span className="text-xs text-gray-400">Avg Steps</span></div>
+          <span className="text-2xl font-bold text-white">{avgSteps >= 1000 ? `${(avgSteps / 1000).toFixed(1)}K` : avgSteps || 0}</span>
         </div>
       </div>
       <div className="mt-3 p-2 rounded-lg bg-white/5 flex items-center justify-around text-center">
