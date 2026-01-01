@@ -766,63 +766,6 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
 // ============================================
 // MEASUREMENTS CARD
 // ============================================
-// WEIGHT TREND CARD
-// ============================================
-const WeightTrendCard = ({ history }) => {
-  if (!history || history.length < 2) return null;
-
-  const weightData = history
-    .filter(h => h.weight && h.weight > 0)
-    .slice(0, 30)
-    .reverse();
-
-  if (weightData.length < 2) return null;
-
-  const weights = weightData.map(d => d.weight);
-  const min = Math.min(...weights);
-  const max = Math.max(...weights);
-  const range = max - min || 1;
-  const latest = weights[weights.length - 1];
-  const first = weights[0];
-  const change = latest - first;
-
-  const width = 280;
-  const height = 60;
-  const padding = 8;
-
-  const points = weights.map((w, i) => {
-    const x = padding + (i / (weights.length - 1)) * (width - padding * 2);
-    const y = height - padding - ((w - min) / range) * (height - padding * 2);
-    return `${x},${y}`;
-  });
-
-  const pathD = `M ${points.join(' L ')}`;
-  const trendColor = change > 0 ? '#22c55e' : change < 0 ? '#ef4444' : '#94a3b8';
-
-  return (
-    <div className="card h-full">
-      <div className="flex items-center gap-2 mb-3">
-        <TrendingUp className="text-blue-400" size={16} />
-        <h3 className="text-sm font-semibold text-white">Weight Trend</h3>
-        <span className="text-xs text-slate-500 ml-auto">Last 30 days</span>
-      </div>
-      <svg width={width} height={height} className="w-full">
-        <line x1={padding} y1={height/2} x2={width-padding} y2={height/2} stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
-        <path d={pathD} fill="none" stroke={trendColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-        <circle cx={parseFloat(points[points.length-1]?.split(',')[0])} cy={parseFloat(points[points.length-1]?.split(',')[1])} r="4" fill={trendColor}/>
-      </svg>
-      <div className="flex justify-between text-xs text-slate-500 mt-1">
-        <span>{min.toFixed(1)} kg</span>
-        <span className={`font-medium ${change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>
-          {change > 0 ? '+' : ''}{change.toFixed(1)} kg
-        </span>
-        <span>{max.toFixed(1)} kg</span>
-      </div>
-    </div>
-  );
-};
-
-// ============================================
 const MeasurementsCard = ({ measurements }) => {
   const current = measurements?.current || {};
   const starting = measurements?.starting || {};
@@ -884,6 +827,61 @@ const MeasurementsCard = ({ measurements }) => {
             <div className={`text-sm ${bmiInfo.color}`}>{bmiInfo.label}</div>
           </div>
           <div className="text-2xl font-bold mt-1">{bmi || 'No data'}</div>
+
+          {/* Weight Trend - Inside BMI section */}
+          {(() => {
+            const history = measurements?.history;
+            if (!history || history.length < 2) return null;
+
+            const weightData = history
+              .filter(h => h.weight && h.weight > 0)
+              .slice(0, 30)
+              .reverse();
+
+            if (weightData.length < 2) return null;
+
+            const weights = weightData.map(d => d.weight);
+            const min = Math.min(...weights);
+            const max = Math.max(...weights);
+            const range = max - min || 1;
+            const latest = weights[weights.length - 1];
+            const first = weights[0];
+            const change = latest - first;
+
+            const width = 280;
+            const height = 50;
+            const padding = 8;
+
+            const points = weights.map((w, i) => {
+              const x = padding + (i / (weights.length - 1)) * (width - padding * 2);
+              const y = height - padding - ((w - min) / range) * (height - padding * 2);
+              return `${x},${y}`;
+            });
+
+            const pathD = `M ${points.join(' L ')}`;
+            const trendColor = change > 0 ? '#22c55e' : change < 0 ? '#ef4444' : '#94a3b8';
+
+            return (
+              <div className="mt-4 pt-4 border-t border-slate-700/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="text-blue-400" size={14} />
+                  <span className="text-xs text-slate-400">Weight Trend (30d)</span>
+                </div>
+                <svg width={width} height={height} className="w-full">
+                  <line x1={padding} y1={height/2} x2={width-padding} y2={height/2} stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
+                  <path d={pathD} fill="none" stroke={trendColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <circle cx={parseFloat(points[points.length-1]?.split(',')[0])} cy={parseFloat(points[points.length-1]?.split(',')[1])} r="3" fill={trendColor}/>
+                </svg>
+                <div className="flex justify-between text-xs text-slate-500 mt-1">
+                  <span>{min.toFixed(1)} kg</span>
+                  <span className={`font-medium ${change > 0 ? 'text-green-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                    {change > 0 ? '+' : ''}{change.toFixed(1)} kg
+                  </span>
+                  <span>{max.toFixed(1)} kg</span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Waist */}
@@ -1927,11 +1925,6 @@ const App = () => {
           <KeyLiftsCard workouts={data.workouts} bodyweight={data.measurements.current.weight} />
           <MeasurementsCard measurements={data.measurements} />
           <WeeklyInsightsCard workouts={data.workouts} conditioning={data.conditioning} appleHealth={data.appleHealth} nutrition={data.nutrition} dateRange={dateRange} />
-        </section>
-
-        {/* Weight Trend Card - Separate Row */}
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
-          <WeightTrendCard history={data.measurements?.history} />
         </section>
 
         {/* Analytics + Logs */}
