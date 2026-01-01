@@ -843,19 +843,28 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       console.warn('This might indicate wrong column mapping!');
     }
 
-    // Update data - PRESERVE Apple Health data for weight/bodyFat
+    // Update data - PRESERVE Apple Health data for weight/bodyFat/waist
     const data = readData();
 
-    // Keep Apple Health weight/bodyFat if they exist
+    // Keep Apple Health data if it exists (Apple Health has priority)
     const appleWeight = data.measurements?.sources?.weight === 'Apple Health' ? data.measurements.current?.weight : null;
     const appleBodyFat = data.measurements?.sources?.bodyFat === 'Apple Health' ? data.measurements.current?.bodyFat : null;
+    const appleWaist = data.measurements?.sources?.waist === 'Apple Health' ? data.measurements.current?.waist : null;
+
+    console.log('=== APPLE HEALTH DATA PRIORITY ===');
+    console.log('Apple Weight:', appleWeight, '(will override Hevy if exists)');
+    console.log('Apple Body Fat:', appleBodyFat, '(will override Hevy if exists)');
+    console.log('Apple Waist:', appleWaist, '(will override Hevy if exists)');
+    console.log('Hevy Weight:', latestWeight?.weight);
+    console.log('Hevy Waist:', latestWithMeasurements.waist);
 
     data.measurements = {
       current: {
-        // Use Apple Health for weight/bodyFat if available, otherwise Hevy
+        // PRIORITY: Apple Health > Hevy > existing data
         weight: appleWeight ?? latestWeight?.weight ?? data.measurements?.current?.weight,
         bodyFat: appleBodyFat ?? latestBodyFat?.bodyFat ?? data.measurements?.current?.bodyFat,
-        // Body measurements from Hevy (Apple doesn't have these)
+        waist: appleWaist ?? latestWithMeasurements.waist ?? data.measurements?.current?.waist,
+        // Body measurements from Hevy (Apple doesn't track these)
         neck: latestWithMeasurements.neck,
         shoulders: latestWithMeasurements.shoulders,
         chest: latestWithMeasurements.chest,
@@ -865,7 +874,6 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
         leftForearm: latestWithMeasurements.leftForearm,
         rightForearm: latestWithMeasurements.rightForearm,
         abdomen: latestWithMeasurements.abdomen,
-        waist: latestWithMeasurements.waist,
         hips: latestWithMeasurements.hips,
         leftThigh: latestWithMeasurements.leftThigh,
         rightThigh: latestWithMeasurements.rightThigh,
@@ -882,13 +890,22 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
         waist: oldest.waist,
         thighs: oldest.thighs,
       },
-      history: measurements,
+      // PRESERVE Apple Health weight history if it exists (don't overwrite with Hevy)
+      history: data.measurements?.history && data.measurements.history.length > 0
+        ? data.measurements.history
+        : measurements,
       sources: {
         weight: appleWeight ? 'Apple Health' : 'Hevy',
         bodyFat: appleBodyFat ? 'Apple Health' : 'Hevy',
+        waist: appleWaist ? 'Apple Health' : 'Hevy',
         measurements: 'Hevy'
       }
     };
+
+    console.log('=== HISTORY PRESERVATION ===');
+    console.log('Existing history count:', data.measurements?.history?.length || 0);
+    console.log('Hevy measurements count:', measurements.length);
+    console.log('Final history count:', data.measurements.history?.length || 0);
 
     data.lastSync = new Date().toISOString();
 
