@@ -131,6 +131,7 @@ const normalizeApiData = (raw) => {
     conditioning: normalizeConditioning(raw.conditioning),
     measurements: normalizeMeasurements(raw.measurements),
     appleHealth: normalizeAppleHealth(raw.appleHealth),
+    nutrition: raw.nutrition || { dailyCalorieIntake: {} },
     lastSync: raw.lastSync,
     lastWebhook: raw.lastWebhook,
   };
@@ -326,6 +327,8 @@ const formatDate = (date) => new Date(date).toLocaleDateString('en-GB', { day: '
 const formatDateShort = (date) => new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 const formatDuration = (seconds) => { const hrs = Math.floor(seconds / 3600); const mins = Math.floor((seconds % 3600) / 60); return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`; };
 const formatPace = (seconds) => { if (!seconds) return '--:--'; const mins = Math.floor(seconds / 60); const secs = Math.round(seconds % 60); return `${mins}:${secs.toString().padStart(2, '0')}`; };
+const formatSteps = (steps) => { if (!steps || steps === 0) return '0'; if (steps >= 1000) { const k = steps / 1000; return k % 1 === 0 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`; } return Math.round(steps).toString(); };
+const estimateSteps = (distanceMeters) => distanceMeters > 0 ? Math.round((distanceMeters / 1000) * 1300) : 0; // ~1300 steps per km
 const daysSince = (date) => Math.floor((new Date() - new Date(date)) / (1000 * 60 * 60 * 24));
 const kgToLbs = (kg) => Math.round(kg * 2.20462);
 
@@ -490,7 +493,8 @@ const generateMockData = () => {
     workouts: generateWorkouts(),
     conditioning: generateConditioning(),
     measurements: { current: { weight: null, bodyFat: null, chest: null, waist: null, biceps: null, thighs: null }, starting: { weight: null, bodyFat: null, chest: null, waist: null, biceps: null, thighs: null }, height: null },
-    appleHealth: { restingHeartRate: null, avgSteps: null, avgActiveCalories: null, sleepAvg: null }
+    appleHealth: { restingHeartRate: null, avgSteps: null, avgActiveCalories: null, sleepAvg: null },
+    nutrition: { dailyCalorieIntake: {} }
   };
 };
 
@@ -761,6 +765,62 @@ const KeyLiftsCard = ({ workouts, bodyweight }) => {
 // ============================================
 // MEASUREMENTS CARD
 // ============================================
+// WEIGHT TREND SPARKLINE
+// ============================================
+const WeightSparkline = ({ history, days = 30 }) => {
+  if (!history || history.length < 2) return null;
+
+  // Get last N days of weight data
+  const weightData = history
+    .filter(h => h.weight && h.weight > 0)
+    .slice(0, days)
+    .reverse(); // Oldest first for left-to-right
+
+  if (weightData.length < 2) return null;
+
+  const weights = weightData.map(d => d.weight);
+  const min = Math.min(...weights);
+  const max = Math.max(...weights);
+  const range = max - min || 1;
+
+  // SVG dimensions
+  const width = 200;
+  const height = 40;
+  const padding = 4;
+
+  // Generate path
+  const points = weights.map((w, i) => {
+    const x = padding + (i / (weights.length - 1)) * (width - padding * 2);
+    const y = height - padding - ((w - min) / range) * (height - padding * 2);
+    return `${x},${y}`;
+  });
+
+  const pathD = `M ${points.join(' L ')}`;
+
+  // Trend direction
+  const trend = weights[weights.length - 1] - weights[0];
+  const trendColor = trend > 0 ? '#22c55e' : trend < 0 ? '#ef4444' : '#94a3b8';
+
+  return (
+    <div className="mt-3">
+      <div className="text-xs text-slate-500 mb-1">Weight Trend ({days}d)</div>
+      <svg width={width} height={height} className="w-full">
+        {/* Grid lines */}
+        <line x1={padding} y1={height/2} x2={width-padding} y2={height/2} stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
+        {/* Trend line */}
+        <path d={pathD} fill="none" stroke={trendColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        {/* End dot */}
+        <circle cx={points[points.length-1]?.split(',')[0]} cy={points[points.length-1]?.split(',')[1]} r="3" fill={trendColor}/>
+      </svg>
+      <div className="flex justify-between text-[10px] text-slate-500">
+        <span>{min.toFixed(1)}kg</span>
+        <span>{max.toFixed(1)}kg</span>
+      </div>
+    </div>
+  );
+};
+
+// ============================================
 const MeasurementsCard = ({ measurements }) => {
   const current = measurements?.current || {};
   const starting = measurements?.starting || {};
@@ -803,6 +863,7 @@ const MeasurementsCard = ({ measurements }) => {
                 {calcChange(weight, starting.weight) > 0 ? '+' : ''}{calcChange(weight, starting.weight)}%
               </div>
             )}
+            <WeightSparkline history={measurements?.history} days={30} />
           </div>
           <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-4 border border-purple-500/20">
             <div className="text-xs text-purple-300 mb-1">Body Fat</div>
@@ -837,9 +898,102 @@ const MeasurementsCard = ({ measurements }) => {
 };
 
 // ============================================
+// CALORIE INSIGHT COMPONENT
+// ============================================
+const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
+  // Calculate calories consumed (from nutrition.dailyCalorieIntake)
+  const dailyIntake = nutrition?.dailyCalorieIntake || {};
+
+  // Filter by date range
+  const now = new Date();
+  const daysBack = dateRange === '7D' ? 7 : dateRange === '30D' ? 30 : dateRange === '90D' ? 90 : 7;
+  const startDate = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000);
+
+  const consumedCalories = Object.entries(dailyIntake)
+    .filter(([date]) => new Date(date) >= startDate)
+    .reduce((sum, [_, cal]) => sum + (cal || 0), 0);
+
+  // Calculate calories burned (from workouts + conditioning)
+  const workoutCalories = (workouts || [])
+    .filter(w => new Date(w.start_time) >= startDate)
+    .reduce((sum, w) => sum + (w.appleHealth?.activeCalories || 0), 0);
+
+  const conditioningCalories = (conditioning || [])
+    .filter(c => new Date(c.date) >= startDate)
+    .reduce((sum, c) => sum + (c.activeCalories || c.calories || 0), 0);
+
+  const burnedCalories = workoutCalories + conditioningCalories;
+
+  // Calculate balance
+  const balance = consumedCalories - burnedCalories;
+  const dailyAvgBalance = balance / daysBack;
+
+  // Estimate weekly weight change (3500 cal = ~0.45kg)
+  const weeklyWeightChange = (dailyAvgBalance * 7) / 7700; // 7700 cal = 1kg
+
+  // Determine goal status
+  const getGoalStatus = () => {
+    if (dailyAvgBalance < -300) return { label: 'Cutting', color: 'text-red-400', icon: '🔥' };
+    if (dailyAvgBalance > 300) return { label: 'Bulking', color: 'text-green-400', icon: '💪' };
+    return { label: 'Maintaining', color: 'text-blue-400', icon: '⚖️' };
+  };
+
+  const goal = getGoalStatus();
+
+  if (consumedCalories === 0 && burnedCalories === 0) {
+    return null; // Don't show if no data
+  }
+
+  return (
+    <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 mt-4">
+      <div className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+        <Flame className="w-4 h-4 text-orange-400" />
+        Calorie Balance ({daysBack}d)
+      </div>
+
+      <div className="space-y-2 text-sm">
+        {consumedCalories > 0 && (
+          <div className="flex justify-between">
+            <span className="text-slate-400">Consumed</span>
+            <span className="text-green-400">{consumedCalories.toLocaleString()} kcal</span>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <span className="text-slate-400">Burned (exercise)</span>
+          <span className="text-red-400">{burnedCalories.toLocaleString()} kcal</span>
+        </div>
+
+        {consumedCalories > 0 && (
+          <>
+            <div className="border-t border-slate-700 my-2"></div>
+            <div className="flex justify-between font-medium">
+              <span className="text-slate-300">Balance</span>
+              <span className={balance < 0 ? 'text-red-400' : 'text-green-400'}>
+                {balance > 0 ? '+' : ''}{balance.toLocaleString()} kcal
+              </span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-500">Est. weekly change</span>
+              <span className={weeklyWeightChange < 0 ? 'text-red-400' : 'text-green-400'}>
+                {weeklyWeightChange > 0 ? '+' : ''}{weeklyWeightChange.toFixed(2)} kg/week
+              </span>
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-2 py-2 rounded-lg bg-slate-900/50">
+              <span className="text-lg">{goal.icon}</span>
+              <span className={`font-medium ${goal.color}`}>{goal.label}</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
 // WEEKLY INSIGHTS CARD
 // ============================================
-const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth }) => {
+const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, dateRange }) => {
   const lastDate = workouts.length > 0 ? new Date(Math.max(...workouts.map(w => new Date(w.start_time)))) : null;
   const restDays = lastDate ? daysSince(lastDate) : 0;
   
@@ -904,6 +1058,14 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth }) => {
       <div className="mt-3 p-2 rounded-lg" style={{ backgroundColor: `${recColor}15` }}>
         <p className="text-xs flex items-center gap-2" style={{ color: recColor }}><Activity size={12} /><span>{recovery >= 70 ? 'Ready to train!' : recovery >= 40 ? 'Light session recommended' : 'Rest day advised'}</span></p>
       </div>
+
+      {/* Calorie Insight */}
+      <CalorieInsight
+        nutrition={nutrition}
+        conditioning={conditioning}
+        workouts={workouts}
+        dateRange={dateRange}
+      />
     </div>
   );
 };
@@ -1066,12 +1228,12 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
         const maxHR = s.length > 0 ? Math.max(...s.map(c => c.maxHeartRate)) : 0;
         const cal = s.reduce((a, c) => a + c.activeCalories, 0);
         const dist = s.reduce((a, c) => a + (c.distance || 0), 0);
-        const runs = s.filter(x => x.category === 'running' && x.pace);
-        const avgPace = runs.length > 0 ? runs.reduce((a, r) => a + r.pace, 0) / runs.length : 0;
+        const totalSteps = s.reduce((a, c) => a + estimateSteps(c.distance || 0), 0);
+        const avgSteps = s.length > 0 ? Math.round(totalSteps / s.length) : 0;
         const trend = s.slice(0, 12).reverse().map(x => ({ date: formatDateShort(x.date), value: x.avgHeartRate }));
         const byType = {};
         s.forEach(x => { if (!byType[x.category]) byType[x.category] = { count: 0, dur: 0, cal: 0, dist: 0 }; byType[x.category].count++; byType[x.category].dur += x.duration; byType[x.category].cal += x.activeCalories; byType[x.category].dist += x.distance || 0; });
-        return { type: 'conditioning', sessions: s.length, totalDuration: Math.round(dur / 60), avgHR: Math.round(avgHR), maxHR, totalCalories: cal, totalDistance: dist.toFixed(1), avgPace, trendData: trend, byType };
+        return { type: 'conditioning', sessions: s.length, totalDuration: Math.round(dur / 60), avgHR: Math.round(avgHR), maxHR, totalCalories: cal, totalDistance: dist.toFixed(1), avgSteps, trendData: trend, byType };
       }
       
       const exercises = {};
@@ -1165,7 +1327,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                   { l: 'Max HR', v: `${cur.maxHR} bpm`, p: prev.maxHR, hl: true },
                   { l: 'Calories', v: cur.totalCalories, p: prev.totalCalories },
                   { l: 'Distance', v: `${Math.round(cur.totalDistance * 0.621371)} mi`, p: parseFloat(prev.totalDistance || 0) * 0.621371 },
-                  { l: 'Avg Pace', v: formatPace(cur.avgPace), p: prev.avgPace, isPace: true },
+                  { l: 'Avg Steps', v: formatSteps(cur.avgSteps), p: prev.avgSteps },
                 ].map((s, i) => {
                   const n = typeof s.v === 'string' ? parseFloat(s.v) : s.v;
                   const c = showComparison && s.p ? cmp(n, s.p) : null;
@@ -1353,9 +1515,10 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
                     <div><p className="text-xs text-gray-500">Duration</p><p className="text-sm font-bold text-white">{formatDuration(s.duration)}</p></div>
-                    <div><p className="text-xs text-gray-500">Avg HR</p><p className="text-sm font-bold text-white">{s.avgHeartRate}</p></div>
-                    <div><p className="text-xs text-gray-500">Calories</p><p className="text-sm font-bold text-white">{s.activeCalories}</p></div>
-                    {s.distance && <div><p className="text-xs text-gray-500">Distance</p><p className="text-sm font-bold text-white">{Math.round(s.distance * 0.621371)} mi</p></div>}
+                    {s.avgHeartRate > 0 && <div><p className="text-xs text-gray-500">Avg HR</p><p className="text-sm font-bold text-white">{s.avgHeartRate}</p></div>}
+                    {s.activeCalories > 0 && <div><p className="text-xs text-gray-500">Calories</p><p className="text-sm font-bold text-white">{s.activeCalories}</p></div>}
+                    {s.distance > 0 && <div><p className="text-xs text-gray-500">Distance</p><p className="text-sm font-bold text-white">{Math.round(s.distance * 0.621371)} mi</p></div>}
+                    {(s.category === 'walking' || s.category === 'running') && s.distance > 0 && <div><p className="text-xs text-gray-500">Steps</p><p className="text-sm font-bold text-white">{formatSteps(estimateSteps(s.distance))}</p></div>}
                   </div>
                 </div>
               </div>
@@ -1699,7 +1862,7 @@ const App = () => {
                 <Dumbbell size={24} className="text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">HIT Tracker Pro</h1>
+                <h1 className="text-xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">Fahim's Tracker Pro</h1>
                 <p className="text-xs text-gray-500">Hevy + Apple Health Integration</p>
               </div>
             </div>
@@ -1737,7 +1900,7 @@ const App = () => {
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
           <KeyLiftsCard workouts={data.workouts} bodyweight={data.measurements.current.weight} />
           <MeasurementsCard measurements={data.measurements} />
-          <WeeklyInsightsCard workouts={data.workouts} conditioning={data.conditioning} appleHealth={data.appleHealth} />
+          <WeeklyInsightsCard workouts={data.workouts} conditioning={data.conditioning} appleHealth={data.appleHealth} nutrition={data.nutrition} dateRange={dateRange} />
         </section>
         
         {/* Analytics + Logs */}
