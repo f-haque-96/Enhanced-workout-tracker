@@ -22,6 +22,7 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
       leanMassRecords: [],
       dietaryCalorieRecords: [],
       waistRecords: [],
+      sleepRecords: [],
       stats: {
         linesProcessed: 0,
         workoutsFound: 0,
@@ -30,7 +31,8 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
         restingHRRecordsFound: 0,
         leanMassRecordsFound: 0,
         dietaryCaloriesFound: 0,
-        waistRecordsFound: 0
+        waistRecordsFound: 0,
+        sleepRecordsFound: 0
       }
     };
 
@@ -137,6 +139,17 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
           results.stats.waistRecordsFound++;
         }
       }
+
+      // ==========================================
+      // SLEEP ANALYSIS (single line)
+      // ==========================================
+      if (line.includes('HKCategoryTypeIdentifierSleepAnalysis') && line.includes('value=')) {
+        const record = parseSleepRecord(line);
+        if (record) {
+          results.sleepRecords.push(record);
+          results.stats.sleepRecordsFound++;
+        }
+      }
     });
 
     rl.on('close', () => {
@@ -148,6 +161,7 @@ async function parseAppleHealthExport(filePath, progressCallback = null) {
       results.leanMassRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
       results.dietaryCalorieRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
       results.waistRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+      results.sleepRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
 
       resolve(results);
     });
@@ -354,6 +368,41 @@ function parseHealthRecord(line, type) {
 }
 
 /**
+ * Parse a single sleep record line
+ * Apple Health sleep records have startDate, endDate, and value (HKCategoryValueSleepAnalysisInBed or Asleep)
+ */
+function parseSleepRecord(line) {
+  try {
+    const startMatch = line.match(/startDate="([^"]+)"/);
+    const endMatch = line.match(/endDate="([^"]+)"/);
+    const valueMatch = line.match(/value="([^"]+)"/);
+
+    if (!startMatch || !endMatch) return null;
+
+    // Calculate duration in hours
+    const startDate = new Date(startMatch[1]);
+    const endDate = new Date(endMatch[1]);
+    const durationHours = (endDate - startDate) / (1000 * 60 * 60);
+
+    // Apple Health sleep value: HKCategoryValueSleepAnalysisInBed (0) or Asleep (1)
+    // We only want actual sleep (value = "HKCategoryValueSleepAnalysisAsleep" or "1")
+    const isActualSleep = valueMatch && (valueMatch[1] === 'HKCategoryValueSleepAnalysisAsleep' || valueMatch[1] === '1');
+
+    // Only record actual sleep, not just "in bed"
+    if (!isActualSleep) return null;
+
+    return {
+      date: startMatch[1].split(' ')[0], // Just the date part
+      startDate: startMatch[1],
+      endDate: endMatch[1],
+      hours: durationHours
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * Process parsed Apple Health data into dashboard format
  */
 function processAppleHealthData(parsedData, existingData) {
@@ -364,7 +413,8 @@ function processAppleHealthData(parsedData, existingData) {
     latestBodyFat: null,
     avgRestingHR: null,
     dailyCalorieIntake: {},
-    weightHistory: []
+    weightHistory: [],
+    sleepRecords: []
   };
 
   // Process workouts
@@ -440,6 +490,24 @@ function processAppleHealthData(parsedData, existingData) {
       date: record.date.split('T')[0].split(' ')[0],
       weight: record.value
     }));
+  }
+
+  // Process sleep records (aggregate by date - sum all sleep sessions per day)
+  if (parsedData.sleepRecords && parsedData.sleepRecords.length > 0) {
+    // Group by date and sum hours
+    const sleepByDate = {};
+    parsedData.sleepRecords.forEach(record => {
+      const dateKey = record.date;
+      if (!sleepByDate[dateKey]) {
+        sleepByDate[dateKey] = 0;
+      }
+      sleepByDate[dateKey] += record.hours;
+    });
+
+    // Convert to array and sort by date (newest first)
+    result.sleepRecords = Object.entries(sleepByDate)
+      .map(([date, hours]) => ({ date, hours }))
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
   }
 
   return result;

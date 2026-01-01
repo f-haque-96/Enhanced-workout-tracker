@@ -1070,12 +1070,188 @@ const BatteryIndicator = ({ percentage, color }) => {
 };
 
 // ============================================
+// REST DAY & SLEEP CARD
+// ============================================
+const RestDaySleepCard = ({ restDays, sleepData, recovery, recColor, recStatus }) => {
+  const avgSleep = sleepData?.avgHours || 0;
+  const lastNightSleep = sleepData?.lastNight || 0;
+  const sleepDebt = sleepData?.debt || 0;
+  const sleepConsistency = sleepData?.consistency || 0;
+
+  // Determine card style based on recovery status
+  const getCardStyle = () => {
+    switch (recStatus) {
+      case 'ready':
+        return {
+          bg: 'from-green-500/20 to-green-600/10',
+          border: 'border-green-500/30',
+          accent: 'text-green-400',
+          icon: '💪',
+          message: 'Well rested - Ready for intense workout!',
+        };
+      case 'moderate':
+        return {
+          bg: 'from-amber-500/20 to-amber-600/10',
+          border: 'border-amber-500/30',
+          accent: 'text-amber-400',
+          icon: '⚡',
+          message: 'Moderate recovery - Light workout or cardio recommended',
+        };
+      case 'fatigued':
+        return {
+          bg: 'from-red-500/20 to-red-600/10',
+          border: 'border-red-500/30',
+          accent: 'text-red-400',
+          icon: '😴',
+          message: 'Fatigued - Consider rest or very light activity',
+        };
+      default:
+        return {
+          bg: 'from-slate-500/20 to-slate-600/10',
+          border: 'border-slate-500/30',
+          accent: 'text-slate-400',
+          icon: '📊',
+          message: 'Insufficient data',
+        };
+    }
+  };
+
+  const style = getCardStyle();
+
+  // Sleep quality rating
+  const getSleepQuality = (hours) => {
+    if (hours >= 7 && hours <= 9) return { label: 'Optimal', color: 'text-green-400' };
+    if (hours >= 6) return { label: 'Adequate', color: 'text-amber-400' };
+    return { label: 'Poor', color: 'text-red-400' };
+  };
+
+  const sleepQuality = getSleepQuality(avgSleep);
+
+  return (
+    <div className={`bg-gradient-to-br ${style.bg} rounded-xl p-4 border ${style.border} col-span-2`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Moon className="w-5 h-5 text-indigo-400" />
+          <span className="font-medium text-slate-200">Recovery & Sleep</span>
+        </div>
+        <div className="text-2xl">{style.icon}</div>
+      </div>
+
+      {/* Main Stats Row */}
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        {/* Recovery Score */}
+        <div className="text-center">
+          <div className={`text-3xl font-bold ${style.accent}`}>{recovery}%</div>
+          <div className="text-xs text-slate-400">Recovery Score</div>
+        </div>
+
+        {/* Rest Days */}
+        <div className="text-center">
+          <div className="text-3xl font-bold text-slate-200">{restDays}</div>
+          <div className="text-xs text-slate-400">Rest Days</div>
+        </div>
+
+        {/* Avg Sleep */}
+        <div className="text-center">
+          <div className="text-3xl font-bold text-indigo-400">
+            {avgSleep > 0 ? avgSleep.toFixed(1) : '--'}<span className="text-lg">h</span>
+          </div>
+          <div className="text-xs text-slate-400">Avg Sleep</div>
+        </div>
+      </div>
+
+      {/* Sleep Details */}
+      {avgSleep > 0 && (
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="bg-slate-900/30 rounded-lg p-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-400">Last Night</span>
+              <span className="font-medium">{lastNightSleep.toFixed(1)}h</span>
+            </div>
+          </div>
+          <div className="bg-slate-900/30 rounded-lg p-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-400">Sleep Quality</span>
+              <span className={`font-medium ${sleepQuality.color}`}>{sleepQuality.label}</span>
+            </div>
+          </div>
+          {sleepDebt > 0.5 && (
+            <div className="bg-slate-900/30 rounded-lg p-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Sleep Debt</span>
+                <span className="font-medium text-red-400">-{sleepDebt.toFixed(1)}h</span>
+              </div>
+            </div>
+          )}
+          <div className="bg-slate-900/30 rounded-lg p-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-400">Consistency</span>
+              <span className="font-medium">{Math.round(sleepConsistency * 100)}%</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Status Message */}
+      <div className={`text-center text-sm ${style.accent} font-medium py-2 bg-slate-900/30 rounded-lg`}>
+        {style.message}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// SLEEP DATA CALCULATION
+// ============================================
+const calculateSleepData = (appleHealth) => {
+  const sleepRecords = appleHealth?.sleepRecords || [];
+
+  if (sleepRecords.length === 0) {
+    return {
+      avgHours: 0,
+      lastNight: 0,
+      debt: 0,
+      consistency: 0,
+    };
+  }
+
+  // Sort by date (newest first)
+  const sorted = [...sleepRecords].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Last 7 days for average
+  const last7Days = sorted.slice(0, 7);
+  const avgHours = last7Days.reduce((sum, r) => sum + (r.hours || 0), 0) / last7Days.length;
+
+  // Last night
+  const lastNight = sorted[0]?.hours || 0;
+
+  // Sleep debt (ideal is 7.5 hours)
+  const idealSleep = 7.5;
+  const debt = Math.max(0, (idealSleep * 7) - last7Days.reduce((sum, r) => sum + (r.hours || 0), 0)) / 7;
+
+  // Consistency (standard deviation based)
+  const mean = avgHours;
+  const variance = last7Days.reduce((sum, r) => sum + Math.pow((r.hours || 0) - mean, 2), 0) / last7Days.length;
+  const stdDev = Math.sqrt(variance);
+  // Lower stdDev = more consistent. 0 stdDev = 100%, 2+ stdDev = ~50%
+  const consistency = Math.max(0, Math.min(1, 1 - (stdDev / 2)));
+
+  return {
+    avgHours,
+    lastNight,
+    debt,
+    consistency,
+  };
+};
+
+// ============================================
 // WEEKLY INSIGHTS CARD
 // ============================================
 const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, dateRange }) => {
   const lastDate = workouts.length > 0 ? new Date(Math.max(...workouts.map(w => new Date(w.start_time)))) : null;
   const restDays = lastDate ? daysSince(lastDate) : 0;
-  
+
   const stats = useMemo(() => {
     let rpeT = 0, rpeC = 0, warm = 0, work = 0, fail = 0;
     workouts.slice(0, 10).forEach(w => {
@@ -1095,51 +1271,101 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, da
     return Math.round(withSteps.reduce((sum, s) => sum + s.steps, 0) / withSteps.length);
   }, [conditioning]);
 
-  // Recovery score: increases with rest days, decreases with high RPE
-  // Rest days: 0-3 days (3 days = full recovery)
-  // RPE: 0-10 (higher = more fatigue, but capped impact)
-  const restScore = Math.min(100, (restDays / 3) * 100); // 3 days = 100%
-  const rpeScore = Math.max(0, 100 - (stats.avgRPE * 8)); // RPE 10 = 20%, RPE 0 = 100%
-  const recovery = Math.round(restScore * 0.75 + rpeScore * 0.25); // 75% rest, 25% RPE
-  const recColor = recovery >= 70 ? '#10B981' : recovery >= 40 ? '#F59E0B' : '#EF4444';
+  // Calculate sleep data
+  const sleepData = useMemo(() => calculateSleepData(appleHealth), [appleHealth]);
+
+  // Enhanced Recovery Score with Sleep Data
+  // Components: Rest Days (40%), RPE (25%), Sleep (35%)
+  const restScore = Math.min(100, restDays === 0 ? 20 : restDays === 1 ? 50 : restDays === 2 ? 75 : 100);
+  const rpeScore = Math.max(0, 100 - (stats.avgRPE * 7)); // RPE 10 = 30%, RPE 0 = 100%
+
+  // Sleep score
+  const avgSleepHours = sleepData.avgHours;
+  const sleepConsistency = sleepData.consistency;
+  let sleepDurationScore;
+  if (avgSleepHours >= 7 && avgSleepHours <= 9) {
+    sleepDurationScore = 100;
+  } else if (avgSleepHours >= 6 && avgSleepHours < 7) {
+    sleepDurationScore = 70;
+  } else if (avgSleepHours >= 5 && avgSleepHours < 6) {
+    sleepDurationScore = 50;
+  } else if (avgSleepHours > 9) {
+    sleepDurationScore = 85;
+  } else {
+    sleepDurationScore = 30;
+  }
+  const sleepScore = (sleepDurationScore * 0.7) + (sleepConsistency * 100 * 0.3);
+
+  // Weighted final recovery score
+  const recovery = Math.round(
+    (restScore * 0.40) +
+    (rpeScore * 0.25) +
+    (sleepScore * 0.35)
+  );
+
+  const recStatus = recovery >= 75 ? 'ready' : recovery >= 50 ? 'moderate' : 'fatigued';
+  const recColor = recovery >= 75 ? '#10B981' : recovery >= 50 ? '#F59E0B' : '#EF4444';
 
   return (
     <div className="card h-full">
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2"><Brain className="text-purple-400" size={20} /><h3 className="text-lg font-semibold text-white">Weekly Insights</h3></div>
-        <Tooltip content={<div><p className="font-medium">Recovery Score</p><p className="text-gray-400">Based on rest & intensity</p></div>}>
-          <div className="flex items-center gap-1 cursor-help"><BatteryIndicator percentage={recovery} color={recColor} /><span className="text-sm font-medium" style={{ color: recColor }}>{recovery}%</span></div>
-        </Tooltip>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-500/5 border border-orange-500/20">
-          <div className="flex items-center gap-2 mb-1"><Clock size={14} className="text-orange-400" /><span className="text-xs text-gray-400">Rest Days</span></div>
-          <span className="text-2xl font-bold text-white">{restDays}</span>
+        <div className="flex items-center gap-2">
+          <Brain className="text-purple-400" size={20} />
+          <h3 className="text-lg font-semibold text-white">Weekly Insights</h3>
         </div>
-        <Tooltip content={<div><p className="font-medium">RPE Scale</p><p className="text-gray-400">7-8: Hard • 9: Very hard • 10: Failure</p></div>}>
-          <div className="p-3 rounded-xl bg-gradient-to-br from-red-500/20 to-red-500/5 border border-red-500/20 cursor-help">
-            <div className="flex items-center gap-2 mb-1"><Zap size={14} className="text-red-400" /><span className="text-xs text-gray-400">Avg RPE</span></div>
-            <span className="text-2xl font-bold text-white">{stats.avgRPE}</span>
+      </div>
+
+      <div className="space-y-4">
+        {/* Row 1: Rest & Sleep Card (full width) */}
+        <RestDaySleepCard
+          restDays={restDays}
+          sleepData={sleepData}
+          recovery={recovery}
+          recColor={recColor}
+          recStatus={recStatus}
+        />
+
+        {/* Row 2: Avg RPE + Avg Steps */}
+        <div className="grid grid-cols-2 gap-3">
+          <Tooltip content={<div><p className="font-medium">RPE Scale</p><p className="text-gray-400">7-8: Hard • 9: Very hard • 10: Failure</p></div>}>
+            <div className="p-3 rounded-xl bg-gradient-to-br from-yellow-500/20 to-yellow-600/10 border border-yellow-500/20 cursor-help">
+              <div className="flex items-center gap-1 text-yellow-300 text-xs mb-1">
+                <Zap className="w-3 h-3" />
+                Avg RPE
+              </div>
+              <div className="text-xl font-bold">{stats.avgRPE}</div>
+            </div>
+          </Tooltip>
+          <div className="p-3 rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/10 border border-green-500/20">
+            <div className="flex items-center gap-1 text-green-300 text-xs mb-1">
+              <Footprints className="w-3 h-3" />
+              Avg Steps
+            </div>
+            <div className="text-xl font-bold">
+              {avgSteps >= 1000 ? `${(avgSteps / 1000).toFixed(1)}K` : avgSteps || 0}
+            </div>
           </div>
-        </Tooltip>
-        <div className="p-3 rounded-xl bg-gradient-to-br from-pink-500/20 to-pink-500/5 border border-pink-500/20">
-          <div className="flex items-center gap-2 mb-1"><Heart size={14} className="text-pink-400" /><span className="text-xs text-gray-400">Resting HR</span></div>
-          <span className="text-2xl font-bold text-white">{appleHealth?.restingHeartRate || '-'}</span>
         </div>
-        <div className="p-3 rounded-xl bg-gradient-to-br from-green-500/20 to-green-500/5 border border-green-500/20">
-          <div className="flex items-center gap-2 mb-1"><Footprints size={14} className="text-green-400" /><span className="text-xs text-gray-400">Avg Steps</span></div>
-          <span className="text-2xl font-bold text-white">{avgSteps >= 1000 ? `${(avgSteps / 1000).toFixed(1)}K` : avgSteps || 0}</span>
+
+        {/* Row 3: Set Breakdown */}
+        <div className="flex justify-around py-2">
+          <Tooltip content="Warmup: Prepare for heavy work">
+            <div className="text-center cursor-help">
+              <div className="text-2xl font-bold text-orange-400">{stats.warmupSets}</div>
+              <div className="text-xs text-slate-500">Warmup</div>
+            </div>
+          </Tooltip>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-slate-200">{stats.workingSets}</div>
+            <div className="text-xs text-slate-500">Working</div>
+          </div>
+          <Tooltip content="Failure: RPE 10 (HIT principle)">
+            <div className="text-center cursor-help">
+              <div className="text-2xl font-bold text-red-400">{stats.failureSets}</div>
+              <div className="text-xs text-slate-500">Failure</div>
+            </div>
+          </Tooltip>
         </div>
-      </div>
-      <div className="mt-3 p-2 rounded-lg bg-white/5 flex items-center justify-around text-center">
-        <Tooltip content="Warmup: Prepare for heavy work"><div className="cursor-help"><p className="text-lg font-bold text-yellow-400">{stats.warmupSets}</p><p className="text-[10px] text-gray-500">Warmup</p></div></Tooltip>
-        <div className="w-px h-8 bg-white/10" />
-        <Tooltip content="Working: Main training volume"><div className="cursor-help"><p className="text-lg font-bold text-blue-400">{stats.workingSets}</p><p className="text-[10px] text-gray-500">Working</p></div></Tooltip>
-        <div className="w-px h-8 bg-white/10" />
-        <Tooltip content="Failure: RPE 10 (HIT principle)"><div className="cursor-help"><p className="text-lg font-bold text-red-400">{stats.failureSets}</p><p className="text-[10px] text-gray-500">Failure</p></div></Tooltip>
-      </div>
-      <div className="mt-3 p-2 rounded-lg" style={{ backgroundColor: `${recColor}15` }}>
-        <p className="text-xs flex items-center gap-2" style={{ color: recColor }}><Activity size={12} /><span>{recovery >= 70 ? 'Ready to train!' : recovery >= 40 ? 'Light session recommended' : 'Rest day advised'}</span></p>
       </div>
 
       {/* Calorie Insight */}

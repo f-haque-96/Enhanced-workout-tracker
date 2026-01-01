@@ -445,12 +445,32 @@ function processAppleHealthData(parsedData) {
     });
   }
 
+  // Process sleep records (aggregate by date if needed)
+  const sleepRecords = [];
+  if (parsedData.sleepRecords && parsedData.sleepRecords.length > 0) {
+    const sleepByDate = {};
+    parsedData.sleepRecords.forEach(record => {
+      const dateKey = record.date;
+      if (!sleepByDate[dateKey]) {
+        sleepByDate[dateKey] = 0;
+      }
+      sleepByDate[dateKey] += record.hours;
+    });
+
+    // Convert to array and sort by date (newest first)
+    Object.entries(sleepByDate).forEach(([date, hours]) => {
+      sleepRecords.push({ date, hours });
+    });
+    sleepRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+  }
+
   return {
     strengthWorkoutData,
     conditioningSessions,
     avgRestingHR,
     dailyCalorieIntake,
-    weightHistory
+    weightHistory,
+    sleepRecords
   };
 }
 
@@ -1011,6 +1031,18 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
       // Mark Apple Health as source for lean mass
       data.measurements.sources = data.measurements.sources || {};
       data.measurements.sources.leanMass = 'Apple Health';
+    }
+
+    // Store sleep records and calculate average
+    if (processed.sleepRecords && processed.sleepRecords.length > 0) {
+      data.appleHealth.sleepRecords = processed.sleepRecords;
+
+      // Calculate 7-day average sleep
+      const last7Days = processed.sleepRecords.slice(0, 7);
+      if (last7Days.length > 0) {
+        const avgSleep = last7Days.reduce((sum, r) => sum + r.hours, 0) / last7Days.length;
+        data.appleHealth.sleepAvg = Math.round(avgSleep * 10) / 10;
+      }
     }
 
     // Store dietary calorie intake data
