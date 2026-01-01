@@ -991,6 +991,31 @@ const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
 };
 
 // ============================================
+// BATTERY INDICATOR WITH FILL LEVEL
+// ============================================
+const BatteryIndicator = ({ percentage, color }) => {
+  const fillHeight = Math.max(2, (percentage / 100) * 10); // 10px max height
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+      {/* Battery outline */}
+      <rect x="3" y="6" width="18" height="12" rx="2" ry="2" />
+      {/* Battery terminal */}
+      <line x1="23" y1="10" x2="23" y2="14" strokeLinecap="round" />
+      {/* Fill level */}
+      <rect
+        x="5"
+        y={18 - fillHeight}
+        width="14"
+        height={fillHeight}
+        fill={color}
+        opacity="0.8"
+        rx="1"
+      />
+    </svg>
+  );
+};
+
+// ============================================
 // WEEKLY INSIGHTS CARD
 // ============================================
 const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, dateRange }) => {
@@ -1025,7 +1050,7 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, da
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2"><Brain className="text-purple-400" size={20} /><h3 className="text-lg font-semibold text-white">Weekly Insights</h3></div>
         <Tooltip content={<div><p className="font-medium">Recovery Score</p><p className="text-gray-400">Based on rest & intensity</p></div>}>
-          <div className="flex items-center gap-1 cursor-help"><Battery size={16} style={{ color: recColor }} /><span className="text-sm font-medium" style={{ color: recColor }}>{recovery}%</span></div>
+          <div className="flex items-center gap-1 cursor-help"><BatteryIndicator percentage={recovery} color={recColor} /><span className="text-sm font-medium" style={{ color: recColor }}>{recovery}%</span></div>
         </Tooltip>
       </div>
       <div className="grid grid-cols-2 gap-3">
