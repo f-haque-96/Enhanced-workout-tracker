@@ -347,9 +347,20 @@ function parseHealthRecord(line, type) {
     let value = parseFloat(valueMatch[1]);
     const unit = unitMatch ? unitMatch[1] : null;
 
+    // Validate weight values (40-200 kg for adults)
+    // This filters out body fat percentage and other invalid data
+    if (type === 'weight' && (value < 40 || value > 200)) {
+      return null;
+    }
+
     // Convert body fat from decimal to percentage if needed
     if (type === 'bodyFat' && value < 1) {
       value = value * 100;
+    }
+
+    // Validate body fat percentage (must be between 1-50%)
+    if (type === 'bodyFat' && (value < 1 || value > 50)) {
+      return null;
     }
 
     // Convert waist from cm to inches (Apple Health stores in cm)

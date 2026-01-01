@@ -845,8 +845,12 @@ const MeasurementsCard = ({ measurements }) => {
   const bodyFatChange = calcChange(bodyFat, starting.bodyFat);
   const weightChange = calcChange(weight, starting.weight);
 
-  // Weight trend calculation
-  const weightData = history.filter(h => h.weight && h.weight > 0).slice(0, 30).reverse();
+  // Weight trend calculation - Filter out invalid weight values (e.g. body fat %)
+  // Valid adult weight range: 40-200 kg
+  const weightData = history
+    .filter(h => h.weight && h.weight >= 40 && h.weight <= 200)
+    .slice(0, 30)
+    .reverse();
   const hasWeightTrend = weightData.length >= 2;
   const weightTrendChange = hasWeightTrend ? weightData[weightData.length - 1].weight - weightData[0].weight : 0;
 

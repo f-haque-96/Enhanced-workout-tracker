@@ -647,7 +647,7 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    console.log('Processing Hevy measurements CSV...');
+    console.log('=== HEVY MEASUREMENT CSV UPLOAD DEBUG ===');
     const fileContent = fs.readFileSync(req.file.path, 'utf8');
     const lines = fileContent.trim().split('\n');
 
@@ -657,31 +657,48 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
     }
 
     // Parse headers - remove quotes and normalize
-    const rawHeaders = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-    console.log('CSV Headers:', rawHeaders);
+    const headerLine = lines[0];
+    const rawHeaders = headerLine.split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
 
-    // Find column indices
+    console.log('Raw header line:', headerLine);
+    console.log('Parsed headers (count:', rawHeaders.length + ')');
+    rawHeaders.forEach((h, i) => console.log(`  [${i}]: "${h}"`));
+
+    // Find column indices using exact matching first, then fallback to includes
+    const findColumn = (exactName, keywords) => {
+      // Try exact match first
+      let idx = rawHeaders.indexOf(exactName);
+      if (idx >= 0) return idx;
+
+      // Try includes match
+      idx = rawHeaders.findIndex(h => keywords.some(kw => h.includes(kw)));
+      return idx;
+    };
+
     const colIdx = {
-      date: rawHeaders.findIndex(h => h === 'date'),
-      weight: rawHeaders.findIndex(h => h.includes('weight')),
-      bodyFat: rawHeaders.findIndex(h => h.includes('fat')),
-      neck: rawHeaders.findIndex(h => h.includes('neck')),
-      shoulders: rawHeaders.findIndex(h => h.includes('shoulder')),
-      chest: rawHeaders.findIndex(h => h.includes('chest')),
+      date: rawHeaders.indexOf('date'),
+      weight: findColumn('weight_kg', ['weight']),
+      bodyFat: findColumn('fat_percent', ['fat']),
+      neck: findColumn('neck_in', ['neck']),
+      shoulders: findColumn('shoulder_in', ['shoulder']),
+      chest: findColumn('chest_in', ['chest']),
       leftBicep: rawHeaders.findIndex(h => h.includes('left') && h.includes('bicep')),
       rightBicep: rawHeaders.findIndex(h => h.includes('right') && h.includes('bicep')),
       leftForearm: rawHeaders.findIndex(h => h.includes('left') && h.includes('forearm')),
       rightForearm: rawHeaders.findIndex(h => h.includes('right') && h.includes('forearm')),
-      abdomen: rawHeaders.findIndex(h => h.includes('abdomen')),
-      waist: rawHeaders.findIndex(h => h.includes('waist')),
-      hips: rawHeaders.findIndex(h => h.includes('hips')),
+      abdomen: findColumn('abdomen_in', ['abdomen']),
+      waist: findColumn('waist_in', ['waist']),
+      hips: findColumn('hips_in', ['hips']),
       leftThigh: rawHeaders.findIndex(h => h.includes('left') && h.includes('thigh')),
       rightThigh: rawHeaders.findIndex(h => h.includes('right') && h.includes('thigh')),
       leftCalf: rawHeaders.findIndex(h => h.includes('left') && h.includes('calf')),
       rightCalf: rawHeaders.findIndex(h => h.includes('right') && h.includes('calf')),
     };
 
-    console.log('Column indices:', colIdx);
+    console.log('=== COLUMN INDEX MAPPING ===');
+    Object.entries(colIdx).forEach(([key, idx]) => {
+      console.log(`  ${key}: index ${idx} = "${rawHeaders[idx] || 'NOT FOUND'}"`);
+    });
 
     // Parse all rows
     const measurements = [];
@@ -692,17 +709,10 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
 
       // DEBUG: Log first data row to check parsing
       if (i === 1) {
-        console.log('First data row split into', values.length, 'values');
-        console.log('Sample values:', {
-          0: values[0],
-          1: values[1],
-          2: values[2],
-          3: values[3],
-          4: values[4],
-          5: values[5],
-          6: values[6],
-          7: values[7]
-        });
+        console.log('=== FIRST DATA ROW DEBUG ===');
+        console.log('Row split into', values.length, 'values');
+        console.log('All values:');
+        values.forEach((v, idx) => console.log(`  [${idx}]: "${v}"`));
       }
 
       const row = { date: null };
@@ -739,12 +749,13 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
 
       // DEBUG: Log first row parsing to check column mapping
       if (i === 1) {
-        console.log('Parsed first row:', {
-          [`shoulders (idx ${colIdx.shoulders})`]: row.shoulders,
-          [`chest (idx ${colIdx.chest})`]: row.chest,
-          [`leftBicep (idx ${colIdx.leftBicep})`]: row.leftBicep,
-          [`rightBicep (idx ${colIdx.rightBicep})`]: row.rightBicep
-        });
+        console.log('=== FIRST ROW EXTRACTED VALUES ===');
+        console.log(`  neck (from idx ${colIdx.neck}):`, row.neck);
+        console.log(`  shoulders (from idx ${colIdx.shoulders}):`, row.shoulders);
+        console.log(`  chest (from idx ${colIdx.chest}):`, row.chest);
+        console.log(`  leftBicep (from idx ${colIdx.leftBicep}):`, row.leftBicep);
+        console.log(`  rightBicep (from idx ${colIdx.rightBicep}):`, row.rightBicep);
+        console.log(`  waist (from idx ${colIdx.waist}):`, row.waist);
       }
       row.abdomen = parseNum(colIdx.abdomen);
       row.waist = parseNum(colIdx.waist);
@@ -790,15 +801,25 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
     const latestBodyFat = measurements.find(m => m.bodyFat !== null && m.bodyFat > 0);
     const oldest = measurements[measurements.length - 1];
 
-    console.log('Selected row for measurements:', {
-      date: latestWithMeasurements.date,
-      weight: latestWithMeasurements.weight,
-      chest: latestWithMeasurements.chest,
-      leftBicep: latestWithMeasurements.leftBicep,
-      rightBicep: latestWithMeasurements.rightBicep
-    });
-    console.log('Latest weight:', latestWeight?.weight);
-    console.log('Latest bodyFat:', latestBodyFat?.bodyFat);
+    console.log('=== SELECTED MEASUREMENT ROW ===');
+    console.log('Date:', latestWithMeasurements.date);
+    console.log('Weight:', latestWithMeasurements.weight);
+    console.log('Neck:', latestWithMeasurements.neck);
+    console.log('Shoulders:', latestWithMeasurements.shoulders);
+    console.log('Chest:', latestWithMeasurements.chest);
+    console.log('Biceps:', latestWithMeasurements.biceps);
+    console.log('Waist:', latestWithMeasurements.waist);
+
+    // VALIDATION: Check if chest value seems wrong
+    if (latestWithMeasurements.chest && latestWithMeasurements.chest < 30) {
+      console.warn('⚠️ WARNING: Chest value seems too low:', latestWithMeasurements.chest);
+      console.warn('This might indicate wrong column mapping!');
+      console.warn('Expected chest to be 30-60 inches for most people');
+    }
+    if (latestWithMeasurements.shoulders && latestWithMeasurements.shoulders < 15) {
+      console.warn('⚠️ WARNING: Shoulders value seems too low:', latestWithMeasurements.shoulders);
+      console.warn('This might indicate wrong column mapping!');
+    }
 
     // Update data - PRESERVE Apple Health data for weight/bodyFat
     const data = readData();
@@ -852,7 +873,13 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
     fs.unlinkSync(req.file.path);
 
     if (writeData(data)) {
-      console.log('Saved measurements:', data.measurements.current);
+      console.log('=== FINAL SAVED MEASUREMENTS ===');
+      console.log('Chest:', data.measurements.current.chest, '"');
+      console.log('Shoulders:', data.measurements.current.shoulders, '"');
+      console.log('Neck:', data.measurements.current.neck, '"');
+      console.log('Biceps:', data.measurements.current.biceps, '"');
+      console.log('Waist:', data.measurements.current.waist, '"');
+
       res.json({
         success: true,
         count: measurements.length,
