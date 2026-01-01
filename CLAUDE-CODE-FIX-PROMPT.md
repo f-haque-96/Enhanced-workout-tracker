@@ -1,396 +1,396 @@
-## FIX: Body Composition Layout, Weekly Insights, Mobile Tooltips
+## TASK 4: Tab Redesigns + Waist from Apple Health
 
-### TASK 1: Redesign Body Composition Card Layout
+### PRIORITY: Check Apple Health for Waist Circumference First
 
-The Body Composition card should have this structure:
+Before the tab redesigns, check if Apple Health export contains waist data:
+```bash
+ssh pi@192.168.1.73
+cd ~/hit-tracker-pro
 
-┌─────────────────────────────────────────────┐
-│ ⚖️ Body Composition                         │
-├─────────────────────────────────────────────┤
-│ ┌─────────────┐  ┌─────────────────────────┐│
-│ │ Weight      │  │ Measurements            ││
-│ │ 84 kg       │  │ Waist: 35"    ↓2.1%     ││
-│ │ +5.1%       │  │ Chest: 40"    ↑3.2%     ││
-│ │ (blue card) │  │ Shoulders: 21" ↑1.5%    ││
-│ └─────────────┘  │ (slate/gray card)       ││
-│                  └─────────────────────────┘│
-├─────────────────────────────────────────────┤
-│ ┌─────────────────────────────────────────┐ │
-│ │  BMI: 27.2                 Overweight   │ │
-│ │                                         │ │
-│ │  (purple card)                          │ │
-│ │     _______________________________     │ │
-│ │                                         │ │
-│ │  Body Fat: 26.5%                        │ │  
-│ │  ↓4.0%                                  │ │
-│ └─────────────────────────────────────────┘ │
-├─────────────────────────────────────────────┤
-│ ┌─────────────────────────────────────────┐ │
-│ │ Weight Trend (30 days)                  │ │
-│ │ ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▂▃▄▅▆ (sparkline)     │ │
-│ │ 80kg ────────────────────────── 84kg    │ │
-│ │ +2.1kg (green if goal is bulk,          │ │
-│ │         red if goal is cut)             │ │
-│ │ (green/red border based on trend)       │ │
-│ └─────────────────────────────────────────┘ │
-└─────────────────────────────────────────────┘
+# Check if waist circumference exists in Apple Health
+docker compose logs backend --tail=500 | grep -i "waist\|circumference\|HKQuantityTypeIdentifierWaistCircumference"
 
-**Implement this layout in src/App.jsx:**
+# Check what body measurement types Apple Health has
+grep -n "HKQuantityTypeIdentifier" backend/apple-health-parser.js 2>/dev/null | head -30
+grep -n "HKQuantityTypeIdentifier" backend/server.js | head -30
+```
+
+**If waist exists in Apple Health, add extraction:**
+```javascript
+// In apple-health-parser.js or server.js, add:
+
+// Waist Circumference (Apple Health stores in cm)
+if (line.includes('HKQuantityTypeIdentifierWaistCircumference') && line.includes('value=')) {
+  const record = parseHealthRecord(line, 'waist');
+  if (record) {
+    results.waistRecords = results.waistRecords || [];
+    results.waistRecords.push(record);
+    results.stats.waistRecordsFound = (results.stats.waistRecordsFound || 0) + 1;
+  }
+}
+
+// When processing, convert cm to inches if needed:
+const latestWaist = results.waistRecords?.length > 0 
+  ? results.waistRecords.sort((a, b) => new Date(b.date) - new Date(a.date))[0].value
+  : null;
+
+// Apple Health priority for waist:
+data.measurements.current.waist = latestWaist ?? hevyWaist ?? existingWaist;
+data.measurements.sources.waist = latestWaist ? 'Apple Health' : 'Hevy';
+```
+
+---
+
+### CARDIO TAB REDESIGN
+
+**Remove:** Recent Sessions card (or move below Activity Breakdown)
+
+**Add:** 
+1. Resting HR & Sleep Analysis Card
+2. Cardio Achievements Card with progress bars
+3. Cardio PRs Card
 ```jsx
-const BodyCompositionCard = ({ measurements }) => {
-  const current = measurements?.current || {};
-  const starting = measurements?.starting || {};
-  const history = measurements?.history || [];
+// Cardio-specific components
+
+const CardioHealthCard = ({ appleHealth, conditioning }) => {
+  const restingHR = appleHealth?.restingHeartRate || 0;
+  const sleepAvg = appleHealth?.sleepAvg || 0;
   
-  const weight = current.weight || 0;
-  const bodyFat = current.bodyFat || 0;
-  const waist = current.waist || 0;
-  const chest = current.chest || 0;
-  const shoulders = current.shoulders || 0;
-  
-  const height = 1.75; // meters - adjust as needed
-  const bmi = weight > 0 ? (weight / (height * height)).toFixed(1) : null;
-  
-  const getBmiCategory = (bmi) => {
-    if (!bmi) return { label: 'No data', color: 'text-slate-400' };
-    if (bmi < 18.5) return { label: 'Underweight', color: 'text-blue-400' };
-    if (bmi < 25) return { label: 'Normal', color: 'text-green-400' };
-    if (bmi < 30) return { label: 'Overweight', color: 'text-yellow-400' };
-    return { label: 'Obese', color: 'text-red-400' };
-  };
-  
-  const bmiInfo = getBmiCategory(parseFloat(bmi));
-  
-  // Calculate percentage change - for measurements, DECREASE is good (cutting)
-  const calcChange = (current, starting) => {
-    if (!current || !starting || starting === 0) return null;
-    return ((current - starting) / starting) * 100;
-  };
-  
-  // For waist: decrease is good (green), increase is bad (red)
-  // For chest/shoulders: increase is good (green), decrease is bad (red)
-  const waistChange = calcChange(waist, starting.waist);
-  const chestChange = calcChange(chest, starting.chest);
-  const shouldersChange = calcChange(shoulders, starting.shoulders);
-  const bodyFatChange = calcChange(bodyFat, starting.bodyFat);
-  
-  // Weight trend calculation
-  const weightData = history.filter(h => h.weight && h.weight > 0).slice(0, 30).reverse();
-  const hasWeightTrend = weightData.length >= 2;
-  const weightTrendChange = hasWeightTrend ? weightData[weightData.length - 1].weight - weightData[0].weight : 0;
+  // Calculate HR zones from conditioning
+  const avgSessionHR = conditioning?.length > 0
+    ? Math.round(conditioning.reduce((sum, c) => sum + (c.avgHeartRate || 0), 0) / conditioning.filter(c => c.avgHeartRate > 0).length)
+    : 0;
   
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Scale className="w-5 h-5 text-blue-400" />
-          Body Composition
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Heart className="w-4 h-4 text-red-400" />
+          Health Metrics
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        
-        {/* Row 1: Weight + Measurements */}
+      <CardContent className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          {/* Weight Card - Blue */}
-          <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl p-4 border border-blue-500/20">
-            <div className="text-xs text-blue-300 mb-1">Weight</div>
-            <div className="text-2xl font-bold">{weight}<span className="text-sm text-slate-400 ml-1">kg</span></div>
-            {calcChange(weight, starting.weight) !== null && (
-              <div className={`text-xs mt-1 ${calcChange(weight, starting.weight) > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {calcChange(weight, starting.weight) > 0 ? '+' : ''}{calcChange(weight, starting.weight).toFixed(1)}%
-              </div>
-            )}
+          <div className="bg-red-500/10 rounded-lg p-3 border border-red-500/20">
+            <div className="text-xs text-red-300">Resting HR</div>
+            <div className="text-xl font-bold">{restingHR} <span className="text-sm text-slate-400">bpm</span></div>
+            <div className="text-xs text-slate-500">{restingHR < 60 ? 'Excellent' : restingHR < 70 ? 'Good' : 'Average'}</div>
           </div>
-          
-          {/* Measurements Card - Slate */}
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-            <div className="text-xs text-slate-400 mb-2">Measurements</div>
-            <div className="space-y-1 text-sm">
-              {waist > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Waist</span>
-                  <span className="flex items-center gap-1">
-                    {waist}"
-                    {waistChange !== null && (
-                      <span className={`text-xs ${waistChange < 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {waistChange > 0 ? '↑' : '↓'}{Math.abs(waistChange).toFixed(1)}%
-                      </span>
-                    )}
-                  </span>
-                </div>
-              )}
-              {chest > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Chest</span>
-                  <span className="flex items-center gap-1">
-                    {chest}"
-                    {chestChange !== null && (
-                      <span className={`text-xs ${chestChange > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {chestChange > 0 ? '↑' : '↓'}{Math.abs(chestChange).toFixed(1)}%
-                      </span>
-                    )}
-                  </span>
-                </div>
-              )}
-              {shoulders > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Shoulders</span>
-                  <span className="flex items-center gap-1">
-                    {shoulders}"
-                    {shouldersChange !== null && (
-                      <span className={`text-xs ${shouldersChange > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {shouldersChange > 0 ? '↑' : '↓'}{Math.abs(shouldersChange).toFixed(1)}%
-                      </span>
-                    )}
-                  </span>
-                </div>
-              )}
-              {!waist && !chest && !shoulders && (
-                <span className="text-slate-500 text-xs">No data</span>
-              )}
-            </div>
+          <div className="bg-indigo-500/10 rounded-lg p-3 border border-indigo-500/20">
+            <div className="text-xs text-indigo-300">Avg Sleep</div>
+            <div className="text-xl font-bold">{sleepAvg.toFixed(1)} <span className="text-sm text-slate-400">hrs</span></div>
+            <div className="text-xs text-slate-500">{sleepAvg >= 7 ? 'Optimal' : sleepAvg >= 6 ? 'Adequate' : 'Low'}</div>
           </div>
         </div>
-        
-        {/* Row 2: BMI + Body Fat - Purple Card */}
-        <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-4 border border-purple-500/20">
-          <div className="flex justify-between items-start">
-            <div>
-              <div className="text-xs text-purple-300 mb-1">BMI</div>
-              <div className="text-2xl font-bold">{bmi || '--'}</div>
-              <div className={`text-xs ${bmiInfo.color}`}>{bmiInfo.label}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-xs text-purple-300 mb-1">Body Fat</div>
-              <div className="text-2xl font-bold">{bodyFat || '--'}<span className="text-sm text-slate-400">%</span></div>
-              {bodyFatChange !== null && (
-                <div className={`text-xs ${bodyFatChange < 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {bodyFatChange > 0 ? '+' : ''}{bodyFatChange.toFixed(1)}%
-                </div>
-              )}
-            </div>
+        {avgSessionHR > 0 && (
+          <div className="bg-slate-800/50 rounded-lg p-3">
+            <div className="text-xs text-slate-400">Avg Workout HR</div>
+            <div className="text-lg font-bold">{avgSessionHR} bpm</div>
           </div>
-        </div>
-        
-        {/* Row 3: Weight Trend - Color coded based on trend */}
-        {hasWeightTrend && (
-          <WeightTrendSection weightData={weightData} trendChange={weightTrendChange} />
         )}
-        
       </CardContent>
     </Card>
   );
 };
 
-// Separate component for Weight Trend
-const WeightTrendSection = ({ weightData, trendChange }) => {
-  const weights = weightData.map(d => d.weight);
-  const min = Math.min(...weights);
-  const max = Math.max(...weights);
-  const range = max - min || 1;
+const CardioAchievementsCard = ({ conditioning }) => {
+  // Calculate cardio achievements
+  const totalDistance = conditioning?.reduce((sum, c) => sum + (c.distance || 0), 0) / 1000 || 0; // km
+  const totalSessions = conditioning?.length || 0;
+  const totalCalories = conditioning?.reduce((sum, c) => sum + (c.activeCalories || c.calories || 0), 0) || 0;
+  const longestSession = Math.max(...(conditioning?.map(c => c.duration || 0) || [0])) / 60; // minutes
   
-  // Determine if trend is good or bad (assuming cutting goal - weight loss is good)
-  // You can make this configurable based on user's goal
-  const isGoodTrend = trendChange < 0; // For cutting: losing weight is good
-  const trendColor = isGoodTrend ? 'green' : 'red';
-  const borderColor = isGoodTrend ? 'border-green-500/30' : 'border-red-500/30';
-  const bgColor = isGoodTrend ? 'from-green-500/10 to-green-600/5' : 'from-red-500/10 to-red-600/5';
-  const lineColor = isGoodTrend ? '#22c55e' : '#ef4444';
-  
-  const width = 280;
-  const height = 50;
-  const padding = 8;
-  
-  const points = weights.map((w, i) => {
-    const x = padding + (i / (weights.length - 1)) * (width - padding * 2);
-    const y = height - padding - ((w - min) / range) * (height - padding * 2);
-    return `${x},${y}`;
-  });
-  
-  const pathD = `M ${points.join(' L ')}`;
+  const achievements = [
+    { 
+      name: 'Marathon Distance', 
+      target: 42.2, 
+      current: totalDistance, 
+      unit: 'km',
+      icon: '🏃'
+    },
+    { 
+      name: '100 Sessions', 
+      target: 100, 
+      current: totalSessions, 
+      unit: 'sessions',
+      icon: '🎯'
+    },
+    { 
+      name: '10K Calories Burned', 
+      target: 10000, 
+      current: totalCalories, 
+      unit: 'kcal',
+      icon: '🔥'
+    },
+    { 
+      name: '60 Min Session', 
+      target: 60, 
+      current: longestSession, 
+      unit: 'min',
+      icon: '⏱️'
+    },
+  ];
   
   return (
-    <div className={`bg-gradient-to-br ${bgColor} rounded-xl p-4 border ${borderColor}`}>
-      <div className="flex justify-between items-center mb-2">
-        <div className="text-xs text-slate-400">Weight Trend (30d)</div>
-        <div className={`text-sm font-medium ${isGoodTrend ? 'text-green-400' : 'text-red-400'}`}>
-          {trendChange > 0 ? '+' : ''}{trendChange.toFixed(1)} kg
-        </div>
-      </div>
-      <svg width={width} height={height} className="w-full">
-        <line x1={padding} y1={height/2} x2={width-padding} y2={height/2} stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
-        <path d={pathD} fill="none" stroke={lineColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-        <circle cx={parseFloat(points[points.length-1]?.split(',')[0]) || 0} cy={parseFloat(points[points.length-1]?.split(',')[1]) || 0} r="4" fill={lineColor}/>
-      </svg>
-      <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-        <span>{min.toFixed(1)} kg</span>
-        <span>{max.toFixed(1)} kg</span>
-      </div>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Trophy className="w-4 h-4 text-amber-400" />
+          Cardio Achievements
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {achievements.map((ach, idx) => {
+          const progress = Math.min((ach.current / ach.target) * 100, 100);
+          const isComplete = progress >= 100;
+          return (
+            <div key={idx} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span>{ach.icon}</span>
+                  <span className={isComplete ? 'text-amber-400' : 'text-slate-300'}>{ach.name}</span>
+                </span>
+                <span className="text-slate-400">
+                  {ach.current.toFixed(1)}/{ach.target} {ach.unit}
+                </span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${isComplete ? 'bg-amber-400' : 'bg-blue-500'}`}
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 };
-```
 
----
-
-### TASK 2: Weekly Insights - Replace Calories with Avg Steps
-
-In the WeeklyInsightsCard, replace the Calories card (green) with Avg Steps:
-```jsx
-{/* Replace the Calories card with Steps */}
-{/* OLD - Remove this: */}
-{/* <div className="bg-green-500/20 ...">Calories</div> */}
-
-{/* NEW - Avg Steps card (keep it green): */}
-<div className="bg-gradient-to-br from-green-500/20 to-green-600/10 rounded-xl p-3 border border-green-500/20">
-  <div className="flex items-center gap-1 text-green-300 text-xs mb-1">
-    <Footprints className="w-3 h-3" />
-    Avg Steps
-  </div>
-  <div className="text-xl font-bold">
-    {avgSteps >= 1000 ? `${(avgSteps / 1000).toFixed(1)}K` : avgSteps || 0}
-  </div>
-</div>
-
-// Calculate avgSteps from conditioning data:
-const avgSteps = useMemo(() => {
-  const sessions = data.conditioning || [];
-  const withSteps = sessions.filter(s => s.steps && s.steps > 0);
-  if (withSteps.length === 0) return 0;
-  return Math.round(withSteps.reduce((sum, s) => sum + s.steps, 0) / withSteps.length);
-}, [data.conditioning]);
-```
-
-Also import Footprints icon:
-```jsx
-import { Footprints } from 'lucide-react';
-```
-
----
-
-### TASK 3: Fix Mobile Tooltip Cutoff in Key Lifts
-
-The tooltip is being cut off on mobile. Update the Tooltip component to:
-1. Detect if near screen edge
-2. Adjust position to stay within viewport
-3. Use smaller width on mobile
-```jsx
-const Tooltip = ({ children, content, position = 'top' }) => {
-  const [show, setShow] = useState(false);
-  const [coords, setCoords] = useState({ top: 0, left: 0 });
-  const triggerRef = useRef(null);
-  const tooltipRef = useRef(null);
+const CardioPRsCard = ({ conditioning }) => {
+  // Calculate PRs from conditioning data
+  const prs = {
+    longestRun: conditioning?.filter(c => c.category === 'running').sort((a, b) => (b.distance || 0) - (a.distance || 0))[0],
+    fastestPace: conditioning?.filter(c => c.pace && c.pace > 0).sort((a, b) => a.pace - b.pace)[0],
+    mostCalories: conditioning?.sort((a, b) => (b.activeCalories || b.calories || 0) - (a.activeCalories || a.calories || 0))[0],
+    longestSwim: conditioning?.filter(c => c.category === 'swimming').sort((a, b) => (b.distance || 0) - (a.distance || 0))[0],
+  };
   
-  const handleMouseEnter = () => {
-    if (!triggerRef.current) return;
-    
-    const rect = triggerRef.current.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const tooltipWidth = Math.min(250, viewportWidth - 20); // Max 250px or viewport - 20px
-    const tooltipHeight = 120; // Approximate
-    const padding = 10;
-    
-    let top, left;
-    
-    // Calculate position
-    if (position === 'top' || position === 'bottom') {
-      left = rect.left + rect.width / 2;
-      
-      // Adjust if would go off screen
-      if (left - tooltipWidth / 2 < padding) {
-        left = tooltipWidth / 2 + padding;
-      } else if (left + tooltipWidth / 2 > viewportWidth - padding) {
-        left = viewportWidth - tooltipWidth / 2 - padding;
-      }
-      
-      if (position === 'top') {
-        top = rect.top - padding;
-        // If not enough room above, show below
-        if (rect.top < tooltipHeight + padding) {
-          top = rect.bottom + padding;
-        }
-      } else {
-        top = rect.bottom + padding;
-      }
-    } else {
-      // Left/right positioning
-      top = rect.top + rect.height / 2;
-      
-      if (position === 'right') {
-        left = rect.right + padding;
-        // If would go off right edge, show left instead
-        if (left + tooltipWidth > viewportWidth - padding) {
-          left = rect.left - padding;
-        }
-      } else {
-        left = rect.left - padding;
-        // If would go off left edge, show right instead
-        if (left - tooltipWidth < padding) {
-          left = rect.right + padding;
-        }
-      }
-    }
-    
-    // Ensure top doesn't go off screen
-    if (top < padding) top = padding;
-    if (top + tooltipHeight > viewportHeight - padding) {
-      top = viewportHeight - tooltipHeight - padding;
-    }
-    
-    setCoords({ top, left });
-    setShow(true);
+  const formatPace = (seconds) => {
+    if (!seconds) return '--:--';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
   
   return (
-    <>
-      <span 
-        ref={triggerRef}
-        className="inline-block cursor-help"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={() => setShow(false)}
-        onTouchStart={(e) => { e.preventDefault(); handleMouseEnter(); }}
-        onTouchEnd={() => setTimeout(() => setShow(false), 3000)}
-      >
-        {children}
-      </span>
-      {show && createPortal(
-        <div 
-          ref={tooltipRef}
-          className="fixed px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl pointer-events-none"
-          style={{ 
-            top: `${coords.top}px`, 
-            left: `${coords.left}px`,
-            transform: 'translate(-50%, -100%)',
-            maxWidth: 'calc(100vw - 20px)',
-            width: '250px',
-            zIndex: 99999,
-          }}
-        >
-          {content}
-        </div>,
-        document.body
-      )}
-    </>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Medal className="w-4 h-4 text-yellow-400" />
+          Personal Records
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {prs.longestRun && (
+          <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+            <span className="text-slate-400">🏃 Longest Run</span>
+            <span className="font-medium">{((prs.longestRun.distance || 0) / 1000).toFixed(2)} km</span>
+          </div>
+        )}
+        {prs.fastestPace && (
+          <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+            <span className="text-slate-400">⚡ Fastest Pace</span>
+            <span className="font-medium">{formatPace(prs.fastestPace.pace)} /km</span>
+          </div>
+        )}
+        {prs.mostCalories && (
+          <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+            <span className="text-slate-400">🔥 Most Calories</span>
+            <span className="font-medium">{prs.mostCalories.activeCalories || prs.mostCalories.calories} kcal</span>
+          </div>
+        )}
+        {prs.longestSwim && (
+          <div className="flex justify-between text-sm py-1">
+            <span className="text-slate-400">🏊 Longest Swim</span>
+            <span className="font-medium">{((prs.longestSwim.distance || 0)).toFixed(0)} m</span>
+          </div>
+        )}
+        {!prs.longestRun && !prs.fastestPace && !prs.mostCalories && (
+          <div className="text-slate-500 text-sm text-center py-2">No PRs recorded yet</div>
+        )}
+      </CardContent>
+    </Card>
   );
 };
 ```
-### TASK 4: Replacement and removal in push pull legs and cardio tabs
 
-In cardio tab - Replace recent session with resting HR and sleep analysis card
-have a card for achievemnts applicable to only cardio section and have a progress bar with it. Add another card for PR's. none of these cards are to be below the activity breakdown card 
+**Cardio Tab Layout Order:**
+1. Overview
+2. CardioHealthCard (Resting HR + Sleep)
+3. CardioAchievementsCard
+4. CardioPRsCard
+5. Activity Breakdown
+6. Heart Rate Trend
+7. Workout Log (Recent Sessions moved here)
 
-in legs tab - remove Exercise breakdown, move recent PRs card to below the Strength Forecasts (1RM) card. Add another card for achievement applicable to legs (if there arent please create some) which have achievemt targets with a progress bar with it 0 -100%
+---
 
-In Pull tab - remove Exercise breakdown, move recent PRs card to below the Strength Forecasts (1RM) card (if there arent any PR's put in there No Pr's hit or put in the last Pr's until a new one is hit). Add another card for achievement applicable to Pull (if there arent please create some) which have achievemt targets with a progress bar with it 0 -100%
+### PUSH/PULL/LEGS TAB REDESIGN
 
-In Push tab - remove Exercise breakdown, move recent PRs card to below the Strength Forecasts (1RM) card. Add another card for achievements applicable to Push (if there arent please create some) which have achievemt targets with a progress bar with it 0 -100%
+**Remove:** Exercise Breakdown card from all three tabs
+
+**Add:** Category-specific achievements with progress bars
+
+**Reorder:** Recent PRs below Strength Forecasts
+```jsx
+// Strength Achievement Card - Reusable for Push/Pull/Legs
+const StrengthAchievementsCard = ({ category, workouts, keyLifts }) => {
+  // Define achievements per category
+  const achievementsByCategory = {
+    push: [
+      { name: '1x BW Bench Press', targetMultiplier: 1.0, lift: 'Incline Bench Press', icon: '🏋️' },
+      { name: '0.75x BW OHP', targetMultiplier: 0.75, lift: 'Shoulder Press', icon: '💪' },
+      { name: '100 Push Workouts', target: 100, type: 'workouts', icon: '📈' },
+      { name: '1000 Working Sets', target: 1000, type: 'sets', icon: '🎯' },
+    ],
+    pull: [
+      { name: '1.5x BW Deadlift', targetMultiplier: 1.5, lift: 'Deadlift', icon: '🏋️' },
+      { name: '1x BW Lat Pulldown', targetMultiplier: 1.0, lift: 'Lat Pulldown', icon: '💪' },
+      { name: '50 Pull Workouts', target: 50, type: 'workouts', icon: '📈' },
+      { name: '10 Pull-up Reps', target: 10, type: 'pullups', icon: '🎯' },
+    ],
+    legs: [
+      { name: '2x BW Squat', targetMultiplier: 2.0, lift: 'Squat', icon: '🏋️' },
+      { name: '2.5x BW Deadlift', targetMultiplier: 2.5, lift: 'Deadlift', icon: '💪' },
+      { name: '50 Leg Workouts', target: 50, type: 'workouts', icon: '📈' },
+      { name: '500kg Total', target: 500, type: 'total', icon: '🎯' },
+    ],
+  };
+  
+  const achievements = achievementsByCategory[category] || [];
+  const bodyweight = 84; // Get from measurements or default
+  
+  // Calculate progress for each achievement
+  const calculateProgress = (ach) => {
+    if (ach.type === 'workouts') {
+      const count = workouts?.filter(w => w.category?.toLowerCase() === category).length || 0;
+      return { current: count, target: ach.target };
+    }
+    if (ach.type === 'sets') {
+      const sets = workouts?.reduce((sum, w) => sum + (w.totalSets || 0), 0) || 0;
+      return { current: sets, target: ach.target };
+    }
+    if (ach.type === 'total') {
+      const total = keyLifts?.reduce((sum, l) => sum + (l.estimated1RM || 0), 0) || 0;
+      return { current: total, target: ach.target };
+    }
+    if (ach.targetMultiplier && ach.lift) {
+      const lift = keyLifts?.find(l => l.name?.includes(ach.lift));
+      const current1RM = lift?.estimated1RM || 0;
+      const target1RM = bodyweight * ach.targetMultiplier;
+      return { current: current1RM, target: target1RM };
+    }
+    return { current: 0, target: 100 };
+  };
+  
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Trophy className="w-4 h-4 text-amber-400" />
+          {category.charAt(0).toUpperCase() + category.slice(1)} Achievements
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {achievements.map((ach, idx) => {
+          const { current, target } = calculateProgress(ach);
+          const progress = Math.min((current / target) * 100, 100);
+          const isComplete = progress >= 100;
+          return (
+            <div key={idx} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span>{ach.icon}</span>
+                  <span className={isComplete ? 'text-amber-400' : 'text-slate-300'}>{ach.name}</span>
+                  {isComplete && <span className="text-green-400">✓</span>}
+                </span>
+                <span className="text-slate-400 text-xs">
+                  {current.toFixed(0)}/{target.toFixed(0)}
+                </span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${isComplete ? 'bg-amber-400' : category === 'push' ? 'bg-orange-500' : category === 'pull' ? 'bg-blue-500' : 'bg-purple-500'}`}
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+};
+
+// Recent PRs Card - Show "No PRs" if empty
+const RecentPRsCard = ({ prs, category }) => {
+  const categoryPRs = prs?.filter(pr => pr.category?.toLowerCase() === category) || [];
+  
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Medal className="w-4 h-4 text-yellow-400" />
+          Recent PRs
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {categoryPRs.length > 0 ? (
+          <div className="space-y-2">
+            {categoryPRs.slice(0, 5).map((pr, idx) => (
+              <div key={idx} className="flex justify-between items-center py-1 border-b border-slate-700/50 last:border-0">
+                <div>
+                  <div className="text-sm font-medium">{pr.exercise}</div>
+                  <div className="text-xs text-slate-500">{pr.date}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-bold text-amber-400">{pr.weight}kg × {pr.reps}</div>
+                  <div className="text-xs text-slate-500">1RM: {pr.estimated1RM?.toFixed(1)}kg</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-4">
+            <div className="text-slate-500 text-sm">No PRs hit yet</div>
+            <div className="text-slate-600 text-xs mt-1">Keep pushing to set new records!</div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
+```
+
+**Push/Pull/Legs Tab Layout Order:**
+1. Overview (with Calories, Avg HR from Apple Health)
+2. Volume Trend
+3. Strength Forecasts (1RM)
+4. RecentPRsCard (moved here, below Strength Forecasts)
+5. StrengthAchievementsCard (new)
+6. Muscle Distribution
+7. Workout Log
+
+**REMOVE from all three tabs:** Exercise Breakdown card
+
 ---
 
 ### DEPLOYMENT
 ```bash
 git add -A
-git commit -m "Redesign: Body comp layout with weight trend, steps in weekly insights, mobile tooltip fix"
+git commit -m "Redesign: Tab layouts, cardio health/achievements/PRs, strength achievements, waist from Apple Health"
 git push origin main
 
 ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && git pull && docker compose down && docker compose up -d --build"
@@ -399,9 +399,10 @@ ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && git pull && docker compose down && 
 ### VERIFICATION
 
 After deployment:
-1. [ ] Body Composition shows: Weight (blue) | Measurements (slate) in top row
-2. [ ] BMI + Body Fat in purple card below
-3. [ ] Weight Trend in its own section with green/red color coding
-4. [ ] Weekly Insights shows "Avg Steps" instead of "Calories"
-5. [ ] Mobile tooltips stay within screen bounds
-6. [ ] Waist decrease shows green, Chest/Shoulders increase shows green
+1. [ ] Cardio tab: Shows Resting HR + Sleep card, Achievements with progress, PRs
+2. [ ] Push tab: No Exercise Breakdown, PRs below Strength Forecasts, Push Achievements
+3. [ ] Pull tab: No Exercise Breakdown, PRs below Strength Forecasts, Pull Achievements  
+4. [ ] Legs tab: No Exercise Breakdown, PRs below Strength Forecasts, Legs Achievements
+5. [ ] All achievement progress bars work 0-100%
+6. [ ] Waist measurement uses Apple Health if available
+7. [ ] "No PRs hit yet" shows if no PRs exist

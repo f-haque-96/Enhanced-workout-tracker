@@ -1266,9 +1266,281 @@ const PRTimeline = ({ workouts }) => {
 };
 
 // ============================================
+// CARDIO TAB COMPONENTS
+// ============================================
+const CardioHealthCard = ({ appleHealth, conditioning }) => {
+  const restingHR = appleHealth?.restingHeartRate || 0;
+  const sleepAvg = appleHealth?.sleepAvg || 0;
+
+  // Calculate HR zones from conditioning
+  const avgSessionHR = conditioning?.length > 0
+    ? Math.round(conditioning.reduce((sum, c) => sum + (c.avgHeartRate || 0), 0) / conditioning.filter(c => c.avgHeartRate > 0).length)
+    : 0;
+
+  return (
+    <div className="p-4 rounded-xl bg-white/5">
+      <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+        <Heart className="w-4 h-4 text-red-400" />
+        Health Metrics
+      </h4>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-red-500/10 rounded-lg p-3 border border-red-500/20">
+            <div className="text-xs text-red-300">Resting HR</div>
+            <div className="text-xl font-bold">{restingHR} <span className="text-sm text-slate-400">bpm</span></div>
+            <div className="text-xs text-slate-500">{restingHR < 60 ? 'Excellent' : restingHR < 70 ? 'Good' : 'Average'}</div>
+          </div>
+          <div className="bg-indigo-500/10 rounded-lg p-3 border border-indigo-500/20">
+            <div className="text-xs text-indigo-300">Avg Sleep</div>
+            <div className="text-xl font-bold">{sleepAvg.toFixed(1)} <span className="text-sm text-slate-400">hrs</span></div>
+            <div className="text-xs text-slate-500">{sleepAvg >= 7 ? 'Optimal' : sleepAvg >= 6 ? 'Adequate' : 'Low'}</div>
+          </div>
+        </div>
+        {avgSessionHR > 0 && (
+          <div className="bg-slate-800/50 rounded-lg p-3">
+            <div className="text-xs text-slate-400">Avg Workout HR</div>
+            <div className="text-lg font-bold">{avgSessionHR} bpm</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const CardioAchievementsCard = ({ conditioning }) => {
+  // Calculate cardio achievements
+  const totalDistance = conditioning?.reduce((sum, c) => sum + (c.distance || 0), 0) / 1000 || 0; // km
+  const totalSessions = conditioning?.length || 0;
+  const totalCalories = conditioning?.reduce((sum, c) => sum + (c.activeCalories || c.calories || 0), 0) || 0;
+  const longestSession = Math.max(...(conditioning?.map(c => c.duration || 0) || [0])) / 60; // minutes
+
+  const achievements = [
+    { name: 'Marathon Distance', target: 42.2, current: totalDistance, unit: 'km', icon: '🏃' },
+    { name: '100 Sessions', target: 100, current: totalSessions, unit: 'sessions', icon: '🎯' },
+    { name: '10K Calories Burned', target: 10000, current: totalCalories, unit: 'kcal', icon: '🔥' },
+    { name: '60 Min Session', target: 60, current: longestSession, unit: 'min', icon: '⏱️' },
+  ];
+
+  return (
+    <div className="p-4 rounded-xl bg-white/5">
+      <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+        <Trophy className="w-4 h-4 text-amber-400" />
+        Cardio Achievements
+      </h4>
+      <div className="space-y-3">
+        {achievements.map((ach, idx) => {
+          const progress = Math.min((ach.current / ach.target) * 100, 100);
+          const isComplete = progress >= 100;
+          return (
+            <div key={idx} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span>{ach.icon}</span>
+                  <span className={isComplete ? 'text-amber-400' : 'text-slate-300'}>{ach.name}</span>
+                </span>
+                <span className="text-slate-400 text-xs">
+                  {ach.current.toFixed(1)}/{ach.target} {ach.unit}
+                </span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${isComplete ? 'bg-amber-400' : 'bg-blue-500'}`}
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const CardioPRsCard = ({ conditioning }) => {
+  // Calculate PRs from conditioning data
+  const prs = {
+    longestRun: conditioning?.filter(c => c.category === 'running').sort((a, b) => (b.distance || 0) - (a.distance || 0))[0],
+    fastestPace: conditioning?.filter(c => c.pace && c.pace > 0).sort((a, b) => a.pace - b.pace)[0],
+    mostCalories: conditioning?.sort((a, b) => (b.activeCalories || b.calories || 0) - (a.activeCalories || a.calories || 0))[0],
+    longestSwim: conditioning?.filter(c => c.category === 'swimming').sort((a, b) => (b.distance || 0) - (a.distance || 0))[0],
+  };
+
+  const hasPRs = prs.longestRun || prs.fastestPace || prs.mostCalories || prs.longestSwim;
+
+  return (
+    <div className="p-4 rounded-xl bg-white/5">
+      <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+        <Medal className="w-4 h-4 text-yellow-400" />
+        Personal Records
+      </h4>
+      <div className="space-y-2">
+        {hasPRs ? (
+          <>
+            {prs.longestRun && (
+              <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+                <span className="text-slate-400">🏃 Longest Run</span>
+                <span className="font-medium">{formatDistance(prs.longestRun.distance)}</span>
+              </div>
+            )}
+            {prs.fastestPace && prs.fastestPace.pace && (
+              <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+                <span className="text-slate-400">⚡ Fastest Pace</span>
+                <span className="font-medium">{formatPace(prs.fastestPace.pace)} /km</span>
+              </div>
+            )}
+            {prs.mostCalories && (
+              <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+                <span className="text-slate-400">🔥 Most Calories</span>
+                <span className="font-medium">{prs.mostCalories.activeCalories || prs.mostCalories.calories} kcal</span>
+              </div>
+            )}
+            {prs.longestSwim && (
+              <div className="flex justify-between text-sm py-1">
+                <span className="text-slate-400">🏊 Longest Swim</span>
+                <span className="font-medium">{((prs.longestSwim.distance || 0)).toFixed(0)} m</span>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-center py-4">
+            <div className="text-slate-500 text-sm">No PRs recorded yet</div>
+            <div className="text-slate-600 text-xs mt-1">Keep pushing to set new records!</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// STRENGTH ACHIEVEMENTS COMPONENT
+// ============================================
+const StrengthAchievementsCard = ({ category, workouts, bodyweight = 84 }) => {
+  // Define achievements per category
+  const achievementsByCategory = {
+    push: [
+      { name: '1x BW Incline Press', targetMultiplier: 1.0, lift: 'Incline Bench Press', icon: '🏋️' },
+      { name: '0.75x BW OHP', targetMultiplier: 0.75, lift: 'Shoulder Press', icon: '💪' },
+      { name: '100 Push Workouts', target: 100, type: 'workouts', icon: '📈' },
+      { name: '500 Working Sets', target: 500, type: 'sets', icon: '🎯' },
+    ],
+    pull: [
+      { name: '1.5x BW Deadlift', targetMultiplier: 1.5, lift: 'Deadlift', icon: '🏋️' },
+      { name: '1x BW Lat Pulldown', targetMultiplier: 1.0, lift: 'Lat Pulldown', icon: '💪' },
+      { name: '50 Pull Workouts', target: 50, type: 'workouts', icon: '📈' },
+      { name: '500 Total Reps', target: 500, type: 'reps', icon: '🎯' },
+    ],
+    legs: [
+      { name: '2x BW Squat', targetMultiplier: 2.0, lift: 'Squat', icon: '🏋️' },
+      { name: '2.5x BW Deadlift', targetMultiplier: 2.5, lift: 'Deadlift', icon: '💪' },
+      { name: '50 Leg Workouts', target: 50, type: 'workouts', icon: '📈' },
+      { name: '400kg Total Volume', target: 400, type: 'total', icon: '🎯' },
+    ],
+  };
+
+  const achievements = achievementsByCategory[category] || [];
+
+  // Calculate progress for each achievement
+  const calculateProgress = (ach) => {
+    if (ach.type === 'workouts') {
+      const count = workouts?.filter(w => w.exercises?.some(e => categorizeExercise(e.title).category === category)).length || 0;
+      return { current: count, target: ach.target };
+    }
+    if (ach.type === 'sets') {
+      let sets = 0;
+      workouts?.forEach(w => {
+        w.exercises?.forEach(e => {
+          if (categorizeExercise(e.title).category === category) {
+            sets += e.sets?.filter(s => s.set_type !== 'warmup').length || 0;
+          }
+        });
+      });
+      return { current: sets, target: ach.target };
+    }
+    if (ach.type === 'reps') {
+      let reps = 0;
+      workouts?.forEach(w => {
+        w.exercises?.forEach(e => {
+          if (categorizeExercise(e.title).category === category) {
+            reps += e.sets?.reduce((sum, s) => sum + (s.set_type !== 'warmup' ? s.reps : 0), 0) || 0;
+          }
+        });
+      });
+      return { current: reps, target: ach.target };
+    }
+    if (ach.type === 'total') {
+      let total = 0;
+      workouts?.forEach(w => {
+        w.exercises?.forEach(e => {
+          if (categorizeExercise(e.title).category === category) {
+            const rm = calculate1RM(e.maxWeight || 0, e.maxReps || 1);
+            total += rm;
+          }
+        });
+      });
+      return { current: total, target: ach.target };
+    }
+    if (ach.targetMultiplier && ach.lift) {
+      let max1RM = 0;
+      workouts?.forEach(w => {
+        w.exercises?.forEach(e => {
+          if (matchKeyLift(e.title) === ach.lift) {
+            e.sets?.forEach(s => {
+              if (s.set_type !== 'warmup') {
+                const rm = calculate1RM(s.weight_kg, s.reps);
+                max1RM = Math.max(max1RM, rm);
+              }
+            });
+          }
+        });
+      });
+      const target1RM = bodyweight * ach.targetMultiplier;
+      return { current: max1RM, target: target1RM };
+    }
+    return { current: 0, target: 100 };
+  };
+
+  return (
+    <div className="p-4 rounded-xl bg-white/5">
+      <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+        <Trophy className="w-4 h-4 text-amber-400" />
+        {category.charAt(0).toUpperCase() + category.slice(1)} Achievements
+      </h4>
+      <div className="space-y-3">
+        {achievements.map((ach, idx) => {
+          const { current, target } = calculateProgress(ach);
+          const progress = Math.min((current / target) * 100, 100);
+          const isComplete = progress >= 100;
+          return (
+            <div key={idx} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span>{ach.icon}</span>
+                  <span className={isComplete ? 'text-amber-400' : 'text-slate-300'}>{ach.name}</span>
+                  {isComplete && <span className="text-green-400">✓</span>}
+                </span>
+                <span className="text-slate-400 text-xs">
+                  {current.toFixed(0)}/{target.toFixed(0)}
+                </span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${isComplete ? 'bg-amber-400' : category === 'push' ? 'bg-orange-500' : category === 'pull' ? 'bg-blue-500' : 'bg-purple-500'}`}
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
 // MAIN WORKOUT & ANALYTICS SECTION
 // ============================================
-const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRange }) => {
+const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRange, appleHealth, measurements }) => {
   const [activeTab, setActiveTab] = useState('push');
   const [expandedWorkouts, setExpandedWorkouts] = useState({});
   const [expandedExercises, setExpandedExercises] = useState({});
@@ -1512,23 +1784,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
             </div>
             
             {activeTab === 'conditioning' ? (
-              <div className="p-4 rounded-xl bg-white/5">
-                <h4 className="text-sm font-medium text-gray-400 mb-3">Recent Sessions</h4>
-                <div className="space-y-2 max-h-32 overflow-y-auto custom-scrollbar">
-                  {filteredConditioning.slice(0, 5).map(s => (
-                    <div key={s.id} className="flex items-center justify-between p-2 rounded-lg bg-black/20">
-                      <div className="flex items-center gap-2">
-                        <ConditioningIcon type={s.category} size={14} style={{ color: color.text }} />
-                        <div><p className="text-xs text-white">{cleanWorkoutType(s.type)}</p><p className="text-[10px] text-gray-500">{formatDateShort(s.date)}</p></div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-white">{formatDuration(s.duration)}</p>
-                        <p className="text-[10px] text-gray-500">{s.avgHeartRate}bpm{s.pace && ` • ${formatPace(s.pace)}/km`}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <CardioHealthCard appleHealth={appleHealth} conditioning={filteredConditioning} />
             ) : (
               <div className="p-4 rounded-xl bg-white/5">
                 <h4 className="text-sm font-medium text-gray-400 mb-3">Strength Forecasts (1RM)</h4>
@@ -1549,8 +1805,22 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
             )}
           </div>
           
-          {/* Exercise Breakdown */}
-          {activeTab !== 'conditioning' && cur.exercises?.length > 0 && (
+          {/* Cardio Achievements & PRs OR Strength Achievements */}
+          {activeTab === 'conditioning' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <CardioAchievementsCard conditioning={filteredConditioning} />
+              <CardioPRsCard conditioning={filteredConditioning} />
+            </div>
+          ) : (
+            <StrengthAchievementsCard
+              category={activeTab}
+              workouts={filteredWorkouts}
+              bodyweight={measurements?.current?.weight || 84}
+            />
+          )}
+
+          {/* OLD Exercise Breakdown - REMOVED */}
+          {false && activeTab !== 'conditioning' && cur.exercises?.length > 0 && (
             <div className="p-4 rounded-xl bg-white/5">
               <h4 className="text-sm font-medium text-gray-400 mb-3">Exercise Breakdown</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1985,7 +2255,7 @@ const App = () => {
 
         {/* Analytics + Logs */}
         <section>
-          <WorkoutAnalyticsSection workouts={data.workouts} conditioning={data.conditioning} dateRange={dateRange} setDateRange={setDateRange} />
+          <WorkoutAnalyticsSection workouts={data.workouts} conditioning={data.conditioning} dateRange={dateRange} setDateRange={setDateRange} appleHealth={data.appleHealth} measurements={data.measurements} />
         </section>
       </main>
       
