@@ -656,9 +656,31 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
       return res.status(400).json({ error: 'CSV file is empty' });
     }
 
-    // Parse headers - remove quotes and normalize
+    // Helper function to parse CSV line respecting quoted fields
+    const parseCSVLine = (line) => {
+      const values = [];
+      let current = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          values.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      values.push(current.trim());
+      return values;
+    };
+
+    // Parse headers - use proper CSV parsing to respect quoted fields
     const headerLine = lines[0];
-    const rawHeaders = headerLine.split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+    const rawHeaders = parseCSVLine(headerLine).map(h => h.toLowerCase());
 
     console.log('Raw header line:', headerLine);
     console.log('Parsed headers (count:', rawHeaders.length + ')');
@@ -704,8 +726,8 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
     const measurements = [];
 
     for (let i = 1; i < lines.length; i++) {
-      // Handle CSV with quoted values
-      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
+      // Parse CSV line respecting quoted fields
+      const values = parseCSVLine(lines[i]);
 
       // DEBUG: Log first data row to check parsing
       if (i === 1) {
