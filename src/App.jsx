@@ -500,102 +500,105 @@ const generateMockData = () => {
 };
 
 // ============================================
-// TOOLTIP COMPONENT
+// TOOLTIP COMPONENT - Mobile Modal Support
 // ============================================
 const Tooltip = ({ children, content, position = 'top' }) => {
   const [show, setShow] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const triggerRef = useRef(null);
-  const tooltipRef = useRef(null);
 
-  const handleMouseEnter = () => {
-    if (!triggerRef.current) return;
+  useEffect(() => {
+    // Detect mobile
+    setIsMobile(window.innerWidth < 640);
+    const handleResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
-    const rect = triggerRef.current.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const tooltipWidth = Math.min(250, viewportWidth - 20); // Max 250px or viewport - 20px
-    const tooltipHeight = 120; // Approximate
-    const padding = 10;
+  const handleOpen = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
 
-    let top, left;
-
-    // Calculate position
-    if (position === 'top' || position === 'bottom') {
-      left = rect.left + rect.width / 2;
-
-      // Adjust if would go off screen
-      if (left - tooltipWidth / 2 < padding) {
-        left = tooltipWidth / 2 + padding;
-      } else if (left + tooltipWidth / 2 > viewportWidth - padding) {
-        left = viewportWidth - tooltipWidth / 2 - padding;
-      }
-
-      if (position === 'top') {
-        top = rect.top - padding;
-        // If not enough room above, show below
-        if (rect.top < tooltipHeight + padding) {
-          top = rect.bottom + padding;
-        }
+      if (isMobile) {
+        // Center on screen for mobile
+        setCoords({
+          top: viewportHeight / 2,
+          left: viewportWidth / 2,
+        });
       } else {
-        top = rect.bottom + padding;
-      }
-    } else {
-      // Left/right positioning
-      top = rect.top + rect.height / 2;
+        // Position near element for desktop
+        let top = rect.top - 10;
+        let left = rect.left + rect.width / 2;
 
-      if (position === 'right') {
-        left = rect.right + padding;
-        // If would go off right edge, show left instead
-        if (left + tooltipWidth > viewportWidth - padding) {
-          left = rect.left - padding;
-        }
-      } else {
-        left = rect.left - padding;
-        // If would go off left edge, show right instead
-        if (left - tooltipWidth < padding) {
-          left = rect.right + padding;
-        }
+        // Keep within viewport
+        const tooltipWidth = 250;
+        if (left - tooltipWidth/2 < 10) left = tooltipWidth/2 + 10;
+        if (left + tooltipWidth/2 > viewportWidth - 10) left = viewportWidth - tooltipWidth/2 - 10;
+        if (top < 100) top = rect.bottom + 10;
+
+        setCoords({ top, left });
       }
     }
-
-    // Ensure top doesn't go off screen
-    if (top < padding) top = padding;
-    if (top + tooltipHeight > viewportHeight - padding) {
-      top = viewportHeight - tooltipHeight - padding;
-    }
-
-    setCoords({ top, left });
     setShow(true);
   };
+
+  const handleClose = () => setShow(false);
 
   return (
     <>
       <span
         ref={triggerRef}
         className="inline-block cursor-help"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={() => setShow(false)}
-        onTouchStart={(e) => { e.preventDefault(); handleMouseEnter(); }}
-        onTouchEnd={() => setTimeout(() => setShow(false), 3000)}
+        onMouseEnter={!isMobile ? handleOpen : undefined}
+        onMouseLeave={!isMobile ? handleClose : undefined}
+        onClick={isMobile ? handleOpen : undefined}
       >
         {children}
       </span>
+
       {show && createPortal(
-        <div
-          ref={tooltipRef}
-          className="fixed px-3 py-2 text-xs rounded-lg bg-slate-800 border border-white/20 shadow-xl pointer-events-none"
-          style={{
-            top: `${coords.top}px`,
-            left: `${coords.left}px`,
-            transform: 'translate(-50%, -100%)',
-            maxWidth: 'calc(100vw - 20px)',
-            width: '250px',
-            zIndex: 99999,
-          }}
-        >
-          {content}
-        </div>,
+        <>
+          {/* Backdrop for mobile */}
+          {isMobile && (
+            <div
+              className="fixed inset-0 bg-black/50 z-[99998]"
+              onClick={handleClose}
+            />
+          )}
+
+          {/* Tooltip content */}
+          <div
+            className={`fixed z-[99999] bg-slate-800 border border-slate-600 rounded-xl shadow-2xl p-4 ${
+              isMobile
+                ? 'w-[90vw] max-w-[320px] -translate-x-1/2 -translate-y-1/2'
+                : 'w-[250px] -translate-x-1/2 -translate-y-full'
+            }`}
+            style={{
+              top: `${coords.top}px`,
+              left: `${coords.left}px`,
+            }}
+            onClick={isMobile ? handleClose : undefined}
+          >
+            {/* Close button for mobile */}
+            {isMobile && (
+              <button
+                className="absolute top-2 right-2 text-slate-400 hover:text-white"
+                onClick={handleClose}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+
+            <div className="text-sm">{content}</div>
+
+            {isMobile && (
+              <div className="text-xs text-slate-500 mt-2 text-center">Tap to close</div>
+            )}
+          </div>
+        </>,
         document.body
       )}
     </>
@@ -1309,16 +1312,58 @@ const CardioHealthCard = ({ appleHealth, conditioning }) => {
 
 const CardioAchievementsCard = ({ conditioning }) => {
   // Calculate cardio achievements
-  const totalDistance = conditioning?.reduce((sum, c) => sum + (c.distance || 0), 0) / 1000 || 0; // km
+  const totalDistanceMeters = conditioning?.reduce((sum, c) => sum + (c.distance || 0), 0) || 0;
+  const totalDistanceMiles = totalDistanceMeters / 1609.34; // meters to miles
   const totalSessions = conditioning?.length || 0;
   const totalCalories = conditioning?.reduce((sum, c) => sum + (c.activeCalories || c.calories || 0), 0) || 0;
   const longestSession = Math.max(...(conditioning?.map(c => c.duration || 0) || [0])) / 60; // minutes
 
+  // Progressive milestones - each achievement advances when completed
+  const getProgressiveMilestone = (current, milestones) => {
+    for (let i = 0; i < milestones.length; i++) {
+      if (current < milestones[i]) return milestones[i];
+    }
+    return milestones[milestones.length - 1];
+  };
+
+  const distanceMilestones = [26.2, 50, 100, 200, 500]; // miles
+  const sessionMilestones = [50, 100, 250, 500, 1000];
+  const calorieMilestones = [10000, 25000, 50000, 100000, 250000];
+  const durationMilestones = [30, 60, 90, 120, 180]; // minutes
+
   const achievements = [
-    { name: 'Marathon Distance', target: 42.2, current: totalDistance, unit: 'km', icon: '🏃' },
-    { name: '100 Sessions', target: 100, current: totalSessions, unit: 'sessions', icon: '🎯' },
-    { name: '10K Calories Burned', target: 10000, current: totalCalories, unit: 'kcal', icon: '🔥' },
-    { name: '60 Min Session', target: 60, current: longestSession, unit: 'min', icon: '⏱️' },
+    {
+      name: 'Distance Runner',
+      target: getProgressiveMilestone(totalDistanceMiles, distanceMilestones),
+      current: totalDistanceMiles,
+      unit: 'mi',
+      icon: '🏃',
+      milestones: distanceMilestones
+    },
+    {
+      name: 'Session Streak',
+      target: getProgressiveMilestone(totalSessions, sessionMilestones),
+      current: totalSessions,
+      unit: 'sessions',
+      icon: '🎯',
+      milestones: sessionMilestones
+    },
+    {
+      name: 'Calorie Crusher',
+      target: getProgressiveMilestone(totalCalories, calorieMilestones),
+      current: totalCalories,
+      unit: 'kcal',
+      icon: '🔥',
+      milestones: calorieMilestones
+    },
+    {
+      name: 'Endurance Master',
+      target: getProgressiveMilestone(longestSession, durationMilestones),
+      current: longestSession,
+      unit: 'min',
+      icon: '⏱️',
+      milestones: durationMilestones
+    },
   ];
 
   return (
@@ -1416,25 +1461,39 @@ const CardioPRsCard = ({ conditioning }) => {
 // STRENGTH ACHIEVEMENTS COMPONENT
 // ============================================
 const StrengthAchievementsCard = ({ category, workouts, bodyweight = 84 }) => {
-  // Define achievements per category
+  // Progressive milestone helper
+  const getProgressiveMilestone = (current, milestones) => {
+    for (let i = 0; i < milestones.length; i++) {
+      if (current < milestones[i]) return milestones[i];
+    }
+    return milestones[milestones.length - 1];
+  };
+
+  // Progressive milestones for different types
+  const workoutMilestones = [10, 25, 50, 100, 250, 500, 1000];
+  const setMilestones = [50, 100, 250, 500, 1000, 2500, 5000];
+  const repMilestones = [100, 250, 500, 1000, 2500, 5000, 10000];
+  const volumeMilestones = [100, 250, 500, 1000, 2500, 5000, 10000]; // kg
+
+  // Define achievements per category with progressive targets
   const achievementsByCategory = {
     push: [
-      { name: '1x BW Incline Press', targetMultiplier: 1.0, lift: 'Incline Bench Press', icon: '🏋️' },
-      { name: '0.75x BW OHP', targetMultiplier: 0.75, lift: 'Shoulder Press', icon: '💪' },
-      { name: '100 Push Workouts', target: 100, type: 'workouts', icon: '📈' },
-      { name: '500 Working Sets', target: 500, type: 'sets', icon: '🎯' },
+      { name: 'Incline Press Strength', targetMultiplier: 1.0, lift: 'Incline Bench Press', icon: '🏋️', multiplierMilestones: [0.75, 1.0, 1.25, 1.5, 1.75, 2.0] },
+      { name: 'OHP Strength', targetMultiplier: 0.75, lift: 'Shoulder Press', icon: '💪', multiplierMilestones: [0.5, 0.75, 1.0, 1.25, 1.5] },
+      { name: 'Push Workouts', type: 'workouts', icon: '📈', milestones: workoutMilestones },
+      { name: 'Working Sets', type: 'sets', icon: '🎯', milestones: setMilestones },
     ],
     pull: [
-      { name: '1.5x BW Deadlift', targetMultiplier: 1.5, lift: 'Deadlift', icon: '🏋️' },
-      { name: '1x BW Lat Pulldown', targetMultiplier: 1.0, lift: 'Lat Pulldown', icon: '💪' },
-      { name: '50 Pull Workouts', target: 50, type: 'workouts', icon: '📈' },
-      { name: '500 Total Reps', target: 500, type: 'reps', icon: '🎯' },
+      { name: 'Deadlift Strength', targetMultiplier: 1.5, lift: 'Deadlift', icon: '🏋️', multiplierMilestones: [1.0, 1.5, 2.0, 2.5, 3.0] },
+      { name: 'Pulldown Strength', targetMultiplier: 1.0, lift: 'Lat Pulldown', icon: '💪', multiplierMilestones: [0.75, 1.0, 1.25, 1.5, 1.75] },
+      { name: 'Pull Workouts', type: 'workouts', icon: '📈', milestones: workoutMilestones },
+      { name: 'Total Reps', type: 'reps', icon: '🎯', milestones: repMilestones },
     ],
     legs: [
-      { name: '2x BW Squat', targetMultiplier: 2.0, lift: 'Squat', icon: '🏋️' },
-      { name: '2.5x BW Deadlift', targetMultiplier: 2.5, lift: 'Deadlift', icon: '💪' },
-      { name: '50 Leg Workouts', target: 50, type: 'workouts', icon: '📈' },
-      { name: '400kg Total Volume', target: 400, type: 'total', icon: '🎯' },
+      { name: 'Squat Strength', targetMultiplier: 2.0, lift: 'Squat', icon: '🏋️', multiplierMilestones: [1.0, 1.5, 2.0, 2.5, 3.0] },
+      { name: 'Leg Press Volume', targetMultiplier: 2.5, lift: 'Leg Press', icon: '💪', multiplierMilestones: [2.0, 2.5, 3.0, 3.5, 4.0] },
+      { name: 'Leg Workouts', type: 'workouts', icon: '📈', milestones: workoutMilestones },
+      { name: 'Total Volume', type: 'total', icon: '🎯', milestones: volumeMilestones },
     ],
   };
 
@@ -1444,7 +1503,8 @@ const StrengthAchievementsCard = ({ category, workouts, bodyweight = 84 }) => {
   const calculateProgress = (ach) => {
     if (ach.type === 'workouts') {
       const count = workouts?.filter(w => w.exercises?.some(e => categorizeExercise(e.title).category === category)).length || 0;
-      return { current: count, target: ach.target };
+      const target = getProgressiveMilestone(count, ach.milestones);
+      return { current: count, target };
     }
     if (ach.type === 'sets') {
       let sets = 0;
@@ -1455,7 +1515,8 @@ const StrengthAchievementsCard = ({ category, workouts, bodyweight = 84 }) => {
           }
         });
       });
-      return { current: sets, target: ach.target };
+      const target = getProgressiveMilestone(sets, ach.milestones);
+      return { current: sets, target };
     }
     if (ach.type === 'reps') {
       let reps = 0;
@@ -1466,21 +1527,26 @@ const StrengthAchievementsCard = ({ category, workouts, bodyweight = 84 }) => {
           }
         });
       });
-      return { current: reps, target: ach.target };
+      const target = getProgressiveMilestone(reps, ach.milestones);
+      return { current: reps, target };
     }
     if (ach.type === 'total') {
       let total = 0;
       workouts?.forEach(w => {
         w.exercises?.forEach(e => {
           if (categorizeExercise(e.title).category === category) {
-            const rm = calculate1RM(e.maxWeight || 0, e.maxReps || 1);
-            total += rm;
+            e.sets?.forEach(s => {
+              if (s.set_type !== 'warmup') {
+                total += s.weight_kg * s.reps;
+              }
+            });
           }
         });
       });
-      return { current: total, target: ach.target };
+      const target = getProgressiveMilestone(total, ach.milestones);
+      return { current: total, target };
     }
-    if (ach.targetMultiplier && ach.lift) {
+    if (ach.targetMultiplier && ach.lift && ach.multiplierMilestones) {
       let max1RM = 0;
       workouts?.forEach(w => {
         w.exercises?.forEach(e => {
@@ -1494,7 +1560,10 @@ const StrengthAchievementsCard = ({ category, workouts, bodyweight = 84 }) => {
           }
         });
       });
-      const target1RM = bodyweight * ach.targetMultiplier;
+      // Find next bodyweight multiplier milestone
+      const currentMultiplier = bodyweight > 0 ? max1RM / bodyweight : 0;
+      const targetMultiplier = getProgressiveMilestone(currentMultiplier, ach.multiplierMilestones);
+      const target1RM = bodyweight * targetMultiplier;
       return { current: max1RM, target: target1RM };
     }
     return { current: 0, target: 100 };
@@ -1532,6 +1601,125 @@ const StrengthAchievementsCard = ({ category, workouts, bodyweight = 84 }) => {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// STRENGTH PERSONAL RECORDS COMPONENT
+// ============================================
+const StrengthPRsCard = ({ category, workouts, bodyweight = 84 }) => {
+  // Calculate PRs from workout data
+  const prs = useMemo(() => {
+    if (!workouts || workouts.length === 0) return null;
+
+    const categoryWorkouts = workouts.filter(w =>
+      w.exercises?.some(e => categorizeExercise(e.title).category === category)
+    );
+
+    // Find max 1RM for each key lift in this category
+    const liftPRs = {};
+    categoryWorkouts.forEach(w => {
+      w.exercises?.forEach(e => {
+        const keyLift = matchKeyLift(e.title);
+        if (keyLift && categorizeExercise(e.title).category === category) {
+          e.sets?.forEach(s => {
+            if (s.set_type !== 'warmup') {
+              const rm = calculate1RM(s.weight_kg, s.reps);
+              if (!liftPRs[keyLift] || rm > liftPRs[keyLift].oneRM) {
+                liftPRs[keyLift] = {
+                  oneRM: rm,
+                  weight: s.weight_kg,
+                  reps: s.reps,
+                  date: w.start_time
+                };
+              }
+            }
+          });
+        }
+      });
+    });
+
+    // Total stats
+    const totalWorkouts = categoryWorkouts.length;
+    let totalVolume = 0;
+    let totalSets = 0;
+    let maxSingleWorkout = 0;
+
+    categoryWorkouts.forEach(w => {
+      let workoutVolume = 0;
+      w.exercises?.forEach(e => {
+        if (categorizeExercise(e.title).category === category) {
+          e.sets?.forEach(s => {
+            if (s.set_type !== 'warmup') {
+              const vol = s.weight_kg * s.reps;
+              totalVolume += vol;
+              workoutVolume += vol;
+              totalSets++;
+            }
+          });
+        }
+      });
+      maxSingleWorkout = Math.max(maxSingleWorkout, workoutVolume);
+    });
+
+    return {
+      liftPRs,
+      totalWorkouts,
+      totalVolume,
+      totalSets,
+      maxSingleWorkout
+    };
+  }, [workouts, category, bodyweight]);
+
+  if (!prs || Object.keys(prs.liftPRs).length === 0) {
+    return (
+      <div className="p-4 rounded-xl bg-white/5">
+        <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+          <Medal className="w-4 h-4 text-yellow-400" />
+          Personal Records
+        </h4>
+        <div className="text-center py-4">
+          <div className="text-slate-500 text-sm">No PRs recorded yet</div>
+          <div className="text-slate-600 text-xs mt-1">Keep training to set new records!</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 rounded-xl bg-white/5">
+      <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+        <Medal className="w-4 h-4 text-yellow-400" />
+        Personal Records
+      </h4>
+      <div className="space-y-2">
+        {/* Lift PRs */}
+        {Object.entries(prs.liftPRs).slice(0, 4).map(([lift, data]) => (
+          <div key={lift} className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+            <span className="text-slate-400">🏋️ {lift}</span>
+            <span className="font-medium">{data.oneRM.toFixed(0)}kg (1RM)</span>
+          </div>
+        ))}
+
+        {/* Additional Stats */}
+        <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+          <span className="text-slate-400">📈 Total Workouts</span>
+          <span className="font-medium">{prs.totalWorkouts}</span>
+        </div>
+        <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+          <span className="text-slate-400">🎯 Total Sets</span>
+          <span className="font-medium">{prs.totalSets}</span>
+        </div>
+        <div className="flex justify-between text-sm py-1 border-b border-slate-700/50">
+          <span className="text-slate-400">💪 Total Volume</span>
+          <span className="font-medium">{(prs.totalVolume / 1000).toFixed(1)}t</span>
+        </div>
+        <div className="flex justify-between text-sm py-1">
+          <span className="text-slate-400">🔥 Best Workout</span>
+          <span className="font-medium">{(prs.maxSingleWorkout / 1000).toFixed(1)}t</span>
+        </div>
       </div>
     </div>
   );
@@ -1805,19 +1993,28 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
             )}
           </div>
           
-          {/* Cardio Achievements & PRs OR Strength Achievements */}
-          {activeTab === 'conditioning' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <CardioAchievementsCard conditioning={filteredConditioning} />
-              <CardioPRsCard conditioning={filteredConditioning} />
-            </div>
-          ) : (
-            <StrengthAchievementsCard
-              category={activeTab}
-              workouts={filteredWorkouts}
-              bodyweight={measurements?.current?.weight || 84}
-            />
-          )}
+          {/* Achievements & PRs for all tabs */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {activeTab === 'conditioning' ? (
+              <>
+                <CardioAchievementsCard conditioning={filteredConditioning} />
+                <CardioPRsCard conditioning={filteredConditioning} />
+              </>
+            ) : (
+              <>
+                <StrengthAchievementsCard
+                  category={activeTab}
+                  workouts={filteredWorkouts}
+                  bodyweight={measurements?.current?.weight || 84}
+                />
+                <StrengthPRsCard
+                  category={activeTab}
+                  workouts={filteredWorkouts}
+                  bodyweight={measurements?.current?.weight || 84}
+                />
+              </>
+            )}
+          </div>
 
           {/* OLD Exercise Breakdown - REMOVED */}
           {false && activeTab !== 'conditioning' && cur.exercises?.length > 0 && (
