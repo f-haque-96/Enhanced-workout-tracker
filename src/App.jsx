@@ -29,6 +29,72 @@ const COLORS = {
 };
 
 // ============================================
+// DATE PARSING & FORMATTING UTILITIES
+// ============================================
+const parseDate = (dateInput) => {
+  if (!dateInput) return null;
+
+  // If already a Date object
+  if (dateInput instanceof Date) {
+    return isNaN(dateInput.getTime()) ? null : dateInput;
+  }
+
+  // If string, try multiple formats
+  if (typeof dateInput === 'string') {
+    // Try standard ISO format
+    let date = new Date(dateInput);
+    if (!isNaN(date.getTime())) return date;
+
+    // Try timestamp (seconds or milliseconds)
+    const num = Number(dateInput);
+    if (!isNaN(num)) {
+      // If less than year 2000 in ms, it's probably seconds
+      date = new Date(num > 1000000000000 ? num : num * 1000);
+      if (!isNaN(date.getTime())) return date;
+    }
+
+    // Try other common formats
+    // "23/12/2025, 12:16 pm" format from Shortcuts
+    const ukMatch = dateInput.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+    if (ukMatch) {
+      let hours = parseInt(ukMatch[4]);
+      if (ukMatch[6]?.toLowerCase() === 'pm' && hours < 12) hours += 12;
+      if (ukMatch[6]?.toLowerCase() === 'am' && hours === 12) hours = 0;
+      date = new Date(ukMatch[3], ukMatch[2] - 1, ukMatch[1], hours, ukMatch[5]);
+      if (!isNaN(date.getTime())) return date;
+    }
+
+    // "Dec 23, 2025" format
+    const usMatch = dateInput.match(/(\w+)\s+(\d{1,2}),?\s*(\d{4})/);
+    if (usMatch) {
+      date = new Date(dateInput);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+
+  // If number (timestamp)
+  if (typeof dateInput === 'number') {
+    const date = new Date(dateInput > 1000000000000 ? dateInput : dateInput * 1000);
+    if (!isNaN(date.getTime())) return date;
+  }
+
+  console.warn('Could not parse date:', dateInput);
+  return null;
+};
+
+// Format date for display
+const formatDisplayDate = (dateInput) => {
+  const date = parseDate(dateInput);
+  if (!date) return 'No date';
+
+  return date.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+};
+
+// ============================================
 // DATA NORMALIZATION - Handles any format
 // ============================================
 
@@ -72,11 +138,14 @@ const normalizeMeasurements = (raw) => {
 const normalizeConditioningSession = (session) => {
   if (!session) return null;
 
+  // Parse and normalize the date
+  const parsedDate = parseDate(session.date ?? session.startDate ?? session.start_time);
+
   return {
     id: session.id ?? `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     type: session.type ?? session.workoutType ?? session.activityType ?? 'Other',
     category: session.category ?? 'other',
-    date: session.date ?? session.startDate ?? session.start_time ?? null,
+    date: parsedDate ? parsedDate.toISOString() : (session.date ?? session.startDate ?? session.start_time ?? null),
     source: session.source ?? 'Unknown',
     duration: session.duration ?? session.durationSeconds ?? (session.durationMinutes ? session.durationMinutes * 60 : 0),
     activeCalories: session.activeCalories ?? session.calories ?? session.totalCalories ?? session.energyBurned ?? session.active_calories ?? 0,
@@ -648,7 +717,7 @@ const ConditioningIcon = ({ type, size = 16, className = '' }) => {
   return <Icon size={size} className={className} />;
 };
 
-const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth, onUploadAppleHealthCSV, onExportJson, onExportCsv, onReset }) => {
+const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth, onUploadAppleHealthCSV, onExportJson, onExportCsv, onReset, onTestJsonSync }) => {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
@@ -671,6 +740,7 @@ const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth,
           </div>
           <div className="p-2">
             <p className="text-xs text-gray-500 px-2 py-1">Actions</p>
+            <button onClick={() => { onTestJsonSync(); setIsOpen(false); }} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 w-full"><Zap size={16} className="text-green-400" /><span className="text-sm text-white">Test Shortcut Sync</span></button>
             <button onClick={() => { onReset(); setIsOpen(false); }} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-red-500/10 w-full"><Trash2 size={16} className="text-red-400" /><span className="text-sm text-red-400">Reset All Data</span></button>
           </div>
         </div>
@@ -2317,7 +2387,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
                     </div>
                     <div>
                       <p className="text-white font-medium">{cleanWorkoutType(s.type)}</p>
-                      <p className="text-xs text-gray-400">{formatDate(s.date)} • <span className="text-pink-400">Apple Health</span></p>
+                      <p className="text-xs text-gray-400">{formatDisplayDate(s.date)} • <span className="text-pink-400">Apple Health</span></p>
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-center gap-4 text-center">
@@ -2652,6 +2722,33 @@ const App = () => {
     } catch { alert('Server error - ensure backend is running'); }
   };
 
+  const handleTestJsonSync = async () => {
+    // Test the JSON endpoint with sample data
+    const testData = {
+      weight: [{ date: new Date().toISOString(), value: 80, source: 'Test' }],
+    };
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/apple-health/json`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(testData),
+      });
+
+      const result = await res.json();
+      if (result.success) {
+        alert('JSON sync endpoint working! You can now use the Apple Shortcut.');
+        fetchData(); // Refresh data to show the test sync
+      } else {
+        alert('Error: ' + result.error);
+      }
+    } catch (error) {
+      alert('Connection error: ' + error.message);
+    }
+  };
+
   const handleExportJson = () => {
     if (!data) return;
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -2732,7 +2829,7 @@ const App = () => {
               <button onClick={handleRefresh} disabled={loading} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50">
                 <RefreshCw size={18} className={`text-gray-400 ${loading ? 'animate-spin' : ''}`} />
               </button>
-              <MoreMenu onUploadHevy={handleUploadHevy} onUploadHevyMeasurements={handleUploadHevyMeasurements} onUploadAppleHealth={handleUploadAppleHealth} onUploadAppleHealthCSV={handleUploadAppleHealthCSV} onExportJson={handleExportJson} onExportCsv={handleExportCsv} onReset={handleReset} />
+              <MoreMenu onUploadHevy={handleUploadHevy} onUploadHevyMeasurements={handleUploadHevyMeasurements} onUploadAppleHealth={handleUploadAppleHealth} onUploadAppleHealthCSV={handleUploadAppleHealthCSV} onExportJson={handleExportJson} onExportCsv={handleExportCsv} onReset={handleReset} onTestJsonSync={handleTestJsonSync} />
             </div>
           </div>
         </div>

@@ -1,250 +1,451 @@
-## FIX: Weight Trend Bad Data + Measurements Still Wrong Columns
+## FIX: "Invalid Date" Showing in Cardio Workout Log
 
-### BUG 1: Weight Trend Shows -58kg with Min 26.1kg
+The conditioning sessions from Apple Shortcuts show "Invalid Date" because the date format from Shortcuts is different than expected.
 
-The weight trend is showing invalid data:
-- Min: 26.1 kg (this is likely body fat % being parsed as weight!)
-- Max: 86.6 kg
-- Change: -58.0 kg (wrong calculation)
+### TASK 1: Fix Date Parsing in Frontend
 
-**Root Cause:** Body fat percentage (26.1%) or other values are being stored as weight records.
-
-**Fix: Filter out invalid weight values:**
-```javascript
-// In WeightTrendSection or wherever weight history is processed:
-const getValidWeightData = (history) => {
-  return history
-    .filter(h => {
-      const weight = h.weight;
-      // Valid adult weight range: 40-200 kg
-      // This filters out body fat % and other bad data
-      return weight && weight >= 40 && weight <= 200;
-    })
-    .slice(0, 30)
-    .reverse();
+Find where conditioning sessions display the date and add robust parsing:
+```jsx
+// Add this helper function near the top of App.jsx
+const parseDate = (dateInput) => {
+  if (!dateInput) return null;
+  
+  // If already a Date object
+  if (dateInput instanceof Date) {
+    return isNaN(dateInput.getTime()) ? null : dateInput;
+  }
+  
+  // If string, try multiple formats
+  if (typeof dateInput === 'string') {
+    // Try standard ISO format
+    let date = new Date(dateInput);
+    if (!isNaN(date.getTime())) return date;
+    
+    // Try timestamp (seconds or milliseconds)
+    const num = Number(dateInput);
+    if (!isNaN(num)) {
+      // If less than year 2000 in ms, it's probably seconds
+      date = new Date(num > 1000000000000 ? num : num * 1000);
+      if (!isNaN(date.getTime())) return date;
+    }
+    
+    // Try other common formats
+    // "23/12/2025, 12:16 pm" format from Shortcuts
+    const ukMatch = dateInput.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+    if (ukMatch) {
+      let hours = parseInt(ukMatch[4]);
+      if (ukMatch[6]?.toLowerCase() === 'pm' && hours < 12) hours += 12;
+      if (ukMatch[6]?.toLowerCase() === 'am' && hours === 12) hours = 0;
+      date = new Date(ukMatch[3], ukMatch[2] - 1, ukMatch[1], hours, ukMatch[5]);
+      if (!isNaN(date.getTime())) return date;
+    }
+    
+    // "Dec 23, 2025" format
+    const usMatch = dateInput.match(/(\w+)\s+(\d{1,2}),?\s*(\d{4})/);
+    if (usMatch) {
+      date = new Date(dateInput);
+      if (!isNaN(date.getTime())) return date;
+    }
+  }
+  
+  // If number (timestamp)
+  if (typeof dateInput === 'number') {
+    const date = new Date(dateInput > 1000000000000 ? dateInput : dateInput * 1000);
+    if (!isNaN(date.getTime())) return date;
+  }
+  
+  console.warn('Could not parse date:', dateInput);
+  return null;
 };
 
-// Also fix the trend change calculation:
-const WeightTrendSection = ({ history }) => {
-  // Filter to valid weights only
-  const weightData = history
-    .filter(h => h.weight && h.weight >= 40 && h.weight <= 200)
-    .slice(0, 30)
-    .reverse();
+// Format date for display
+const formatDisplayDate = (dateInput) => {
+  const date = parseDate(dateInput);
+  if (!date) return 'No date';
   
-  if (weightData.length < 2) return null;
-  
-  const weights = weightData.map(d => d.weight);
-  const min = Math.min(...weights);
-  const max = Math.max(...weights);
-  const first = weights[0]; // Oldest in range
-  const latest = weights[weights.length - 1]; // Most recent
-  const change = latest - first; // Should be positive if gaining, negative if losing
-  
-  // ... rest of component
-  
-  return (
-    <div>
-      {/* Show change from first to latest, not min to max */}
-      <div className={change > 0 ? 'text-green-400' : 'text-red-400'}>
-        {change > 0 ? '+' : ''}{change.toFixed(1)} kg
-      </div>
+  return date.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+};
+```
+
+### TASK 2: Update Conditioning Session Display
+
+Find where conditioning sessions are rendered and use the new formatter:
+```jsx
+// In the conditioning/cardio workout log display:
+{conditioning.map((session, idx) => (
+  <div key={session.id || idx} className="...">
+    <div className="...">
+      <span className="font-medium">{session.type || 'Workout'}</span>
+      <span className="text-slate-500 text-sm">
+        {formatDisplayDate(session.date)} • {session.source || 'Apple Health'}
+      </span>
     </div>
-  );
+    {/* ... rest of session display */}
+  </div>
+))}
+```
+
+### TASK 3: Also Fix Date in Data Normalization
+
+Update normalizeConditioningSession to handle dates:
+```jsx
+const normalizeConditioningSession = (session) => {
+  if (!session) return null;
+  
+  // Parse and normalize the date
+  const parsedDate = parseDate(session.date || session.startDate);
+  
+  return {
+    ...session,
+    date: parsedDate ? parsedDate.toISOString() : session.date,
+    activeCalories: session.activeCalories ?? session.calories ?? 0,
+    avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? session.hr_avg ?? 0,
+    maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? session.hr_max ?? 0,
+    distance: session.distance ?? 0,
+    duration: session.duration ?? 0,
+    steps: session.steps ?? 0,
+  };
 };
 ```
 
-**Also check the Apple Health parser** - make sure body fat isn't being added to weight records:
+## IMPLEMENT: Apple Health JSON API Endpoint for Shortcuts Automation
+
+### TASK 3: Create New API Endpoint for JSON Health Data
+
+Add a new endpoint that accepts JSON from Apple Shortcuts:
 ```javascript
-// In apple-health-parser.js or server.js
-// When parsing HKQuantityTypeIdentifierBodyMass:
-if (line.includes('HKQuantityTypeIdentifierBodyMass') && line.includes('value=')) {
-  const valueMatch = line.match(/value="([^"]+)"/);
-  if (valueMatch) {
-    const weight = parseFloat(valueMatch[1]);
-    // Only store if valid weight (not body fat %)
-    if (weight >= 40 && weight <= 200) {
-      results.weightRecords.push({ date, value: weight });
-    }
-  }
-}
-
-// Body fat should be separate:
-if (line.includes('HKQuantityTypeIdentifierBodyFatPercentage') && line.includes('value=')) {
-  const valueMatch = line.match(/value="([^"]+)"/);
-  if (valueMatch) {
-    const bodyFat = parseFloat(valueMatch[1]);
-    // Body fat is 0-1 in Apple Health, convert to percentage
-    const percentage = bodyFat < 1 ? bodyFat * 100 : bodyFat;
-    if (percentage > 0 && percentage < 50) {
-      results.bodyFatRecords.push({ date, value: percentage });
-    }
-  }
-}
-```
-
----
-
-### BUG 2: Measurements STILL Reading Wrong Columns
-
-Current display:
-- Chest: 21" (WRONG - this is shoulders from column 4)
-- Shoulders: 15.5" (WRONG - this is neck from column 3)
-
-CSV columns:
-Column 0: date
-Column 1: weight_kg
-Column 2: fat_percent
-Column 3: neck_in = 15.5
-Column 4: shoulder_in = 21
-Column 5: chest_in = 40
-Column 6: left_bicep_in = 14
-
-**The parser is STILL off by one or reading wrong indices.**
-
-**COMPLETE REWRITE of measurement parsing with explicit debugging:**
-```javascript
-app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res) => {
+// POST /api/apple-health/json
+// Accepts JSON payload from Apple Shortcuts with health data
+app.post('/api/apple-health/json', express.json({ limit: '50mb' }), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+    const userId = getUserId(req);
+    console.log(`Apple Health JSON upload for user: ${userId}`);
+    
+    const payload = req.body;
+    
+    // Validate payload
+    if (!payload || typeof payload !== 'object') {
+      return res.status(400).json({ error: 'Invalid JSON payload' });
     }
     
-    const fileContent = fs.readFileSync(req.file.path, 'utf8');
-    const lines = fileContent.trim().split('\n');
+    console.log('Received health data:', {
+      weightRecords: payload.weight?.length || 0,
+      bodyFatRecords: payload.bodyFat?.length || 0,
+      workouts: payload.workouts?.length || 0,
+      sleepRecords: payload.sleep?.length || 0,
+      heartRateRecords: payload.heartRate?.length || 0,
+      steps: payload.steps?.length || 0,
+      activeCalories: payload.activeCalories?.length || 0,
+    });
     
-    // Parse header row
-    const headerLine = lines[0];
-    const headers = headerLine.split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
+    // Read existing data
+    const data = readUserData ? readUserData(userId) : readData();
     
-    console.log('=== HEVY CSV DEBUG ===');
-    console.log('Header line:', headerLine);
-    console.log('Parsed headers:', headers);
-    
-    // Create explicit index map
-    const idx = {
-      date: headers.indexOf('date'),
-      weight_kg: headers.indexOf('weight_kg'),
-      fat_percent: headers.indexOf('fat_percent'),
-      neck_in: headers.indexOf('neck_in'),
-      shoulder_in: headers.indexOf('shoulder_in'),
-      chest_in: headers.indexOf('chest_in'),
-      left_bicep_in: headers.indexOf('left_bicep_in'),
-      right_bicep_in: headers.indexOf('right_bicep_in'),
-      waist_in: headers.indexOf('waist_in'),
-      abdomen_in: headers.indexOf('abdomen_in'),
-      hips_in: headers.indexOf('hips_in'),
-      left_thigh_in: headers.indexOf('left_thigh_in'),
-      right_thigh_in: headers.indexOf('right_thigh_in'),
-    };
-    
-    console.log('Column indices:', idx);
-    
-    // Find the row with body measurements (last row with chest/shoulders data)
-    let measurementRow = null;
-    
-    for (let i = lines.length - 1; i >= 1; i--) {
-      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
+    // Process Weight Records
+    if (payload.weight && Array.isArray(payload.weight)) {
+      const validWeights = payload.weight
+        .filter(w => w.value && w.value >= 40 && w.value <= 200)
+        .map(w => ({
+          date: w.date || w.startDate || new Date().toISOString(),
+          value: parseFloat(w.value),
+          source: w.source || 'Apple Health',
+        }))
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
       
-      // Check if this row has body measurements (not just weight)
-      const hasChest = idx.chest_in >= 0 && values[idx.chest_in] && values[idx.chest_in] !== '';
-      const hasShoulders = idx.shoulder_in >= 0 && values[idx.shoulder_in] && values[idx.shoulder_in] !== '';
-      const hasWaist = idx.waist_in >= 0 && values[idx.waist_in] && values[idx.waist_in] !== '';
-      
-      if (hasChest || hasShoulders || hasWaist) {
-        measurementRow = values;
-        console.log(`Found measurement row at line ${i}:`, values);
-        break;
+      if (validWeights.length > 0) {
+        // Update current weight
+        data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
+        data.measurements.current.weight = validWeights[0].value;
+        
+        // Update history (keep last 90 days)
+        const existingHistory = data.measurements.history || [];
+        const weightDates = new Set(existingHistory.map(h => h.date?.split('T')[0]));
+        
+        validWeights.forEach(w => {
+          const dateKey = w.date.split('T')[0];
+          if (!weightDates.has(dateKey)) {
+            existingHistory.push({
+              date: w.date,
+              weight: w.value,
+            });
+          }
+        });
+        
+        // Sort and limit to 90 days
+        data.measurements.history = existingHistory
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
+          .slice(0, 90);
+        
+        data.measurements.sources = data.measurements.sources || {};
+        data.measurements.sources.weight = 'Apple Health';
       }
     }
     
-    if (!measurementRow) {
-      console.log('No body measurement row found, using last row');
-      measurementRow = lines[lines.length - 1].split(',').map(v => v.replace(/"/g, '').trim());
-    }
-    
-    // Extract values using explicit indices
-    const getValue = (colIdx) => {
-      if (colIdx < 0 || colIdx >= measurementRow.length) return null;
-      const val = measurementRow[colIdx];
-      if (!val || val === '') return null;
-      const num = parseFloat(val);
-      return isNaN(num) ? null : num;
-    };
-    
-    const measurements = {
-      neck: getValue(idx.neck_in),
-      shoulders: getValue(idx.shoulder_in),
-      chest: getValue(idx.chest_in),
-      leftBicep: getValue(idx.left_bicep_in),
-      rightBicep: getValue(idx.right_bicep_in),
-      waist: getValue(idx.waist_in) || getValue(idx.abdomen_in),
-      hips: getValue(idx.hips_in),
-      leftThigh: getValue(idx.left_thigh_in),
-      rightThigh: getValue(idx.right_thigh_in),
-    };
-    
-    measurements.biceps = measurements.leftBicep || measurements.rightBicep;
-    measurements.thighs = measurements.leftThigh || measurements.rightThigh;
-    
-    console.log('=== EXTRACTED MEASUREMENTS ===');
-    console.log('Neck:', measurements.neck, '(from column', idx.neck_in, ')');
-    console.log('Shoulders:', measurements.shoulders, '(from column', idx.shoulder_in, ')');
-    console.log('Chest:', measurements.chest, '(from column', idx.chest_in, ')');
-    console.log('Waist:', measurements.waist);
-    console.log('Biceps:', measurements.biceps);
-    
-    // Verify the values make sense
-    if (measurements.chest && measurements.chest < 30) {
-      console.warn('WARNING: Chest value seems too low:', measurements.chest);
-      console.warn('This might be reading from wrong column!');
-      console.warn('Row values:', measurementRow);
-    }
-    
-    // Update data
-    const data = readData();
-    
-    data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
-    data.measurements.current = {
-      ...data.measurements.current,
-      neck: measurements.neck,
-      shoulders: measurements.shoulders,
-      chest: measurements.chest,
-      biceps: measurements.biceps,
-      leftBicep: measurements.leftBicep,
-      rightBicep: measurements.rightBicep,
-      waist: measurements.waist,
-      hips: measurements.hips,
-      thighs: measurements.thighs,
-      leftThigh: measurements.leftThigh,
-      rightThigh: measurements.rightThigh,
-    };
-    
-    data.lastSync = new Date().toISOString();
-    
-    fs.unlinkSync(req.file.path);
-    
-    if (writeData(data)) {
-      console.log('=== SAVED MEASUREMENTS ===');
-      console.log('Chest:', data.measurements.current.chest);
-      console.log('Shoulders:', data.measurements.current.shoulders);
-      console.log('Neck:', data.measurements.current.neck);
+    // Process Body Fat Records
+    if (payload.bodyFat && Array.isArray(payload.bodyFat)) {
+      const validBodyFat = payload.bodyFat
+        .filter(bf => bf.value && bf.value > 0 && bf.value < 50)
+        .map(bf => ({
+          date: bf.date || bf.startDate || new Date().toISOString(),
+          // Apple Health stores as decimal (0.25), convert to percentage (25)
+          value: bf.value < 1 ? bf.value * 100 : bf.value,
+          source: bf.source || 'Apple Health',
+        }))
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
       
-      res.json({ 
-        success: true, 
-        measurements: {
-          chest: data.measurements.current.chest,
-          shoulders: data.measurements.current.shoulders,
-          waist: data.measurements.current.waist,
-          neck: data.measurements.current.neck,
+      if (validBodyFat.length > 0) {
+        data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
+        data.measurements.current.bodyFat = validBodyFat[0].value;
+        data.measurements.sources = data.measurements.sources || {};
+        data.measurements.sources.bodyFat = 'Apple Health';
+        
+        // Add to history
+        validBodyFat.forEach(bf => {
+          const existing = data.measurements.history.find(
+            h => h.date?.split('T')[0] === bf.date.split('T')[0]
+          );
+          if (existing) {
+            existing.bodyFat = bf.value;
+          }
+        });
+      }
+    }
+    
+    // Process Lean Body Mass
+    if (payload.leanBodyMass && Array.isArray(payload.leanBodyMass)) {
+      const validLeanMass = payload.leanBodyMass
+        .filter(lm => lm.value && lm.value >= 30 && lm.value <= 150)
+        .sort((a, b) => new Date(b.date || b.startDate) - new Date(a.date || a.startDate));
+      
+      if (validLeanMass.length > 0) {
+        data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
+        data.measurements.current.leanMass = validLeanMass[0].value;
+      }
+    }
+    
+    // Process Waist Circumference
+    if (payload.waistCircumference && Array.isArray(payload.waistCircumference)) {
+      const validWaist = payload.waistCircumference
+        .filter(w => w.value && w.value > 0)
+        .map(w => ({
+          date: w.date || w.startDate,
+          // Apple Health stores in cm, convert to inches
+          value: w.unit === 'cm' ? w.value / 2.54 : w.value,
+        }))
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      
+      if (validWaist.length > 0) {
+        data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
+        data.measurements.current.waist = validWaist[0].value;
+        data.measurements.sources = data.measurements.sources || {};
+        data.measurements.sources.waist = 'Apple Health';
+      }
+    }
+    
+    // Process Sleep Records
+    if (payload.sleep && Array.isArray(payload.sleep)) {
+      const sleepRecords = payload.sleep
+        .filter(s => s.value || s.duration)
+        .map(s => ({
+          date: s.date || s.startDate || s.endDate,
+          // Duration in hours
+          hours: s.value ? parseFloat(s.value) / 3600 : s.duration / 3600,
+          source: s.source || 'Apple Health',
+        }))
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      
+      if (sleepRecords.length > 0) {
+        data.appleHealth = data.appleHealth || {};
+        data.appleHealth.sleepRecords = sleepRecords.slice(0, 30);
+        
+        // Calculate average sleep
+        const last7 = sleepRecords.slice(0, 7);
+        data.appleHealth.sleepAvg = last7.reduce((sum, s) => sum + s.hours, 0) / last7.length;
+      }
+    }
+    
+    // Process Resting Heart Rate
+    if (payload.restingHeartRate && Array.isArray(payload.restingHeartRate)) {
+      const hrRecords = payload.restingHeartRate
+        .filter(hr => hr.value && hr.value > 30 && hr.value < 150)
+        .sort((a, b) => new Date(b.date || b.startDate) - new Date(a.date || a.startDate));
+      
+      if (hrRecords.length > 0) {
+        data.appleHealth = data.appleHealth || {};
+        // Average of last 7 days
+        const last7 = hrRecords.slice(0, 7);
+        data.appleHealth.restingHeartRate = Math.round(
+          last7.reduce((sum, hr) => sum + hr.value, 0) / last7.length
+        );
+      }
+    }
+    
+    // Process Workouts (Conditioning)
+    if (payload.workouts && Array.isArray(payload.workouts)) {
+      const workouts = payload.workouts.map(w => {
+        // Determine category
+        const type = (w.type || w.workoutType || '').toLowerCase();
+        let category = 'other';
+        if (type.includes('walk')) category = 'walking';
+        else if (type.includes('run')) category = 'running';
+        else if (type.includes('cycl') || type.includes('bike')) category = 'cycling';
+        else if (type.includes('swim')) category = 'swimming';
+        else if (type.includes('hiit') || type.includes('interval')) category = 'hiit';
+        else if (type.includes('strength') || type.includes('weight')) category = 'strength';
+        else if (type.includes('yoga')) category = 'yoga';
+        else if (type.includes('elliptical')) category = 'elliptical';
+        else if (type.includes('row')) category = 'rowing';
+        
+        // Clean up type name
+        let displayType = type
+          .replace('hkworkoutactivitytype', '')
+          .replace(/([A-Z])/g, ' $1')
+          .trim();
+        displayType = displayType.charAt(0).toUpperCase() + displayType.slice(1);
+        
+        return {
+          id: `apple-${w.startDate || w.date}-${Math.random().toString(36).substr(2, 9)}`,
+          type: displayType || 'Workout',
+          category,
+          date: w.startDate || w.date,
+          endDate: w.endDate,
+          source: 'Apple Health',
+          duration: w.duration || 0, // seconds
+          activeCalories: Math.round(w.activeCalories || w.calories || 0),
+          totalCalories: Math.round(w.totalCalories || w.activeCalories || w.calories || 0),
+          avgHeartRate: Math.round(w.avgHeartRate || w.averageHeartRate || 0),
+          maxHeartRate: Math.round(w.maxHeartRate || w.maximumHeartRate || 0),
+          distance: w.distance || 0, // meters
+          steps: w.steps || 0,
+        };
+      }).filter(w => w.duration > 0 || w.activeCalories > 0);
+      
+      // Merge with existing conditioning (avoid duplicates by date)
+      data.conditioning = data.conditioning || [];
+      const existingDates = new Set(data.conditioning.map(c => c.date?.split('T')[0]));
+      
+      workouts.forEach(w => {
+        const dateKey = w.date?.split('T')[0];
+        // Check for duplicate by date and type
+        const isDuplicate = data.conditioning.some(
+          c => c.date?.split('T')[0] === dateKey && c.type === w.type
+        );
+        if (!isDuplicate) {
+          data.conditioning.push(w);
         }
       });
+      
+      // Sort by date (newest first)
+      data.conditioning.sort((a, b) => new Date(b.date) - new Date(a.date));
+      
+      // Also try to merge with Hevy workouts
+      if (data.workouts && data.workouts.length > 0) {
+        data.workouts = data.workouts.map(workout => {
+          const workoutDate = workout.start_time?.split('T')[0];
+          const matchingApple = workouts.find(w => {
+            const appleDate = w.date?.split('T')[0];
+            return appleDate === workoutDate && w.category === 'strength';
+          });
+          
+          if (matchingApple) {
+            return {
+              ...workout,
+              appleHealth: {
+                duration: matchingApple.duration,
+                activeCalories: matchingApple.activeCalories,
+                avgHeartRate: matchingApple.avgHeartRate,
+                maxHeartRate: matchingApple.maxHeartRate,
+              }
+            };
+          }
+          return workout;
+        });
+      }
+    }
+    
+    // Process Daily Steps
+    if (payload.steps && Array.isArray(payload.steps)) {
+      const stepsRecords = payload.steps
+        .filter(s => s.value && s.value > 0)
+        .sort((a, b) => new Date(b.date || b.startDate) - new Date(a.date || a.startDate));
+      
+      if (stepsRecords.length > 0) {
+        data.appleHealth = data.appleHealth || {};
+        // Average of last 7 days
+        const last7 = stepsRecords.slice(0, 7);
+        data.appleHealth.avgSteps = Math.round(
+          last7.reduce((sum, s) => sum + s.value, 0) / last7.length
+        );
+      }
+    }
+    
+    // Process Active Calories (daily totals)
+    if (payload.activeCalories && Array.isArray(payload.activeCalories)) {
+      const calRecords = payload.activeCalories
+        .filter(c => c.value && c.value > 0)
+        .sort((a, b) => new Date(b.date || b.startDate) - new Date(a.date || a.startDate));
+      
+      if (calRecords.length > 0) {
+        data.appleHealth = data.appleHealth || {};
+        const last7 = calRecords.slice(0, 7);
+        data.appleHealth.avgActiveCalories = Math.round(
+          last7.reduce((sum, c) => sum + c.value, 0) / last7.length
+        );
+      }
+    }
+    
+    // Process Dietary Calories (from MacroFactor etc.)
+    if (payload.dietaryCalories && Array.isArray(payload.dietaryCalories)) {
+      data.nutrition = data.nutrition || { dailyCalorieIntake: {} };
+      
+      payload.dietaryCalories.forEach(dc => {
+        const dateKey = (dc.date || dc.startDate)?.split('T')[0];
+        if (dateKey && dc.value) {
+          data.nutrition.dailyCalorieIntake[dateKey] = Math.round(dc.value);
+        }
+      });
+    }
+    
+    // Update sync timestamp
+    data.lastSync = new Date().toISOString();
+    data.lastSyncSource = 'Apple Shortcut';
+    
+    // Save data
+    const saved = writeUserData ? writeUserData(userId, data) : writeData(data);
+    
+    if (saved) {
+      const response = {
+        success: true,
+        message: 'Health data synced successfully',
+        synced: {
+          weight: payload.weight?.length || 0,
+          bodyFat: payload.bodyFat?.length || 0,
+          workouts: payload.workouts?.length || 0,
+          sleep: payload.sleep?.length || 0,
+          restingHR: payload.restingHeartRate?.length || 0,
+          steps: payload.steps?.length || 0,
+        },
+        current: {
+          weight: data.measurements?.current?.weight,
+          bodyFat: data.measurements?.current?.bodyFat,
+          restingHR: data.appleHealth?.restingHeartRate,
+          sleepAvg: data.appleHealth?.sleepAvg?.toFixed(1),
+        },
+        timestamp: data.lastSync,
+      };
+      
+      console.log('Sync successful:', response);
+      res.json(response);
     } else {
-      res.status(500).json({ error: 'Failed to save' });
+      res.status(500).json({ error: 'Failed to save data' });
     }
     
   } catch (error) {
-    console.error('Measurement upload error:', error);
+    console.error('Apple Health JSON upload error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -252,23 +453,62 @@ app.post('/api/hevy/measurements/upload', upload.single('file'), async (req, res
 
 ---
 
+### TASK 4: Add Menu Option for Manual JSON Sync Test
+
+In the frontend MoreMenu, add option to test JSON sync:
+```jsx
+// Add to upload menu options
+{
+  id: 'test-json-sync',
+  label: '🔗 Test Shortcut Sync',
+  action: async () => {
+    // Test the JSON endpoint with sample data
+    const testData = {
+      weight: [{ date: new Date().toISOString(), value: 80, source: 'Test' }],
+    };
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/apple-health/json?userId=${userId}`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-User-Id': userId,
+        },
+        body: JSON.stringify(testData),
+      });
+      
+      const result = await res.json();
+      if (result.success) {
+        alert('JSON sync endpoint working! You can now use the Apple Shortcut.');
+      } else {
+        alert('Error: ' + result.error);
+      }
+    } catch (error) {
+      alert('Connection error: ' + error.message);
+    }
+  }
+}
+```
+
+---
+
 ### DEPLOYMENT
 ```bash
 git add -A
-git commit -m "Fix: Weight trend filter invalid data, measurement column parsing debug"
+git commit -m "Feature: Apple Health JSON API for Shortcuts automation"
 git push origin main
 
 ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && git pull && docker compose down && docker compose up -d --build"
-
-# After deployment, re-upload measurement_data.csv and check logs:
-ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && docker compose logs backend --tail=100 | grep -A 20 'HEVY CSV DEBUG'"
 ```
 
-### VERIFICATION
-
-After re-uploading measurements CSV:
-1. [ ] Check logs show correct column indices (chest_in should be 5)
-2. [ ] Chest should show 40" (not 21")
-3. [ ] Shoulders should show 21" (not 15.5")
-4. [ ] Weight trend min should be ~78kg (not 26kg)
-5. [ ] Weight trend change should be reasonable (±5kg, not -58kg)
+### TEST THE ENDPOINT
+```bash
+# Test with curl
+curl -X POST http://100.80.30.43:3001/api/apple-health/json \
+  -H "Content-Type: application/json" \
+  -d '{
+    "weight": [{"date": "2025-01-01T10:00:00Z", "value": 84.5}],
+    "bodyFat": [{"date": "2025-01-01T10:00:00Z", "value": 0.265}],
+    "restingHeartRate": [{"date": "2025-01-01T10:00:00Z", "value": 58}]
+  }'
+```
