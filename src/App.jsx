@@ -178,20 +178,24 @@ const normalizeMeasurements = (raw) => {
 const normalizeConditioningSession = (session) => {
   if (!session) return null;
 
-  // Parse and normalize the date
-  const parsedDate = parseDate(session.date ?? session.startDate ?? session.start_time);
+  // Parse and normalize the date - handle multiple field name formats
+  const parsedDate = parseDate(
+    session.date ?? session.Date ?? session.startDate ?? session['Start Date'] ??
+    session.Start_Date ?? session.start_time
+  );
 
   return {
-    id: session.id ?? `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    type: session.type ?? session.workoutType ?? session.activityType ?? 'Other',
-    category: session.category ?? 'other',
+    id: session.id ?? session.Id ?? `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    type: session.type ?? session.Type ?? session.workoutType ?? session.activityType ?? 'Other',
+    category: session.category ?? session.Category ?? 'other',
     date: parsedDate ? parsedDate.toISOString() : (session.date ?? session.startDate ?? session.start_time ?? null),
-    source: session.source ?? 'Unknown',
-    duration: session.duration ?? session.durationSeconds ?? (session.durationMinutes ? session.durationMinutes * 60 : 0),
-    activeCalories: session.activeCalories ?? session.calories ?? session.totalCalories ?? session.energyBurned ?? session.active_calories ?? 0,
-    avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? session.hr_avg ?? session.heartRateAvg ?? session.avg_hr ?? 0,
-    maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? session.hr_max ?? session.heartRateMax ?? session.max_hr ?? 0,
-    distance: session.distance ?? session.totalDistance ?? session.distanceKm ?? 0,
+    source: session.source ?? session.Source ?? 'Unknown',
+    duration: session.duration ?? session.Duration ?? session.durationSeconds ?? (session.durationMinutes ? session.durationMinutes * 60 : 0),
+    activeCalories: session.activeCalories ?? session.activeEnergy ?? session.calories ?? session.Calories ?? session.totalCalories ?? session.energyBurned ?? session.active_calories ?? 0,
+    avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? session.hr_avg ?? session.heartRateAvg ?? session.avg_hr ?? session.AvgHeartRate ?? 0,
+    maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? session.hr_max ?? session.heartRateMax ?? session.max_hr ?? session.MaxHeartRate ?? 0,
+    distance: session.distance ?? session.Distance ?? session.totalDistance ?? session.distanceKm ?? 0,
+    steps: session.steps ?? session.Steps ?? 0,
     pace: session.pace ?? session.avgPace ?? null,
     hrZones: session.hrZones ?? { zone1: 20, zone2: 30, zone3: 30, zone4: 15, zone5: 5 }
   };
@@ -1083,8 +1087,9 @@ const MeasurementsCard = ({ measurements }) => {
 // ============================================
 // CALORIE INSIGHT COMPONENT
 // ============================================
-const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
+const CalorieInsight = ({ nutrition, conditioning, workouts, appleHealth, dateRange }) => {
   const dailyIntake = nutrition?.dailyCalorieIntake || {};
+  const dailyActiveCalories = appleHealth?.dailyActiveCalories || {};
 
   const now = new Date();
   const daysMap = { '7D': 7, '30D': 30, '90D': 90, '1Y': 365, 'All': 9999 };
@@ -1099,16 +1104,33 @@ const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
 
   const consumedCalories = dailyEntries.reduce((sum, [_, cal]) => sum + (cal || 0), 0);
 
-  // Calculate burned calories
-  const workoutCalories = (workouts || [])
+  // Calculate burned calories - prioritize Apple Health Shortcut data
+  // Sum active calories from Apple Health Shortcut data (more comprehensive)
+  const burnedFromShortcut = Object.entries(dailyActiveCalories)
+    .filter(([date]) => new Date(date) >= startDate)
+    .reduce((sum, [_, cal]) => sum + cal, 0);
+
+  // Sum calories from workouts with Apple Health data
+  const burnedFromWorkouts = (workouts || [])
     .filter(w => new Date(w.start_time) >= startDate)
     .reduce((sum, w) => sum + (w.appleHealth?.activeCalories || 0), 0);
 
-  const conditioningCalories = (conditioning || [])
+  // Sum calories from conditioning sessions
+  const burnedFromConditioning = (conditioning || [])
     .filter(c => new Date(c.date) >= startDate)
     .reduce((sum, c) => sum + (c.activeCalories || c.calories || 0), 0);
 
-  const burnedCalories = workoutCalories + conditioningCalories;
+  // Use Shortcut data if available (most comprehensive), otherwise use workout + conditioning
+  const burnedCalories = burnedFromShortcut > 0
+    ? burnedFromShortcut
+    : (burnedFromWorkouts + burnedFromConditioning);
+
+  console.log('Calorie calculation:', {
+    burnedFromShortcut,
+    burnedFromWorkouts,
+    burnedFromConditioning,
+    totalBurned: burnedCalories,
+  });
 
   const balance = consumedCalories - burnedCalories;
   const avgDailyIntake = dailyEntries.length > 0
@@ -1749,6 +1771,7 @@ const WeeklyInsightsCard = ({ workouts, conditioning, appleHealth, nutrition, da
         nutrition={nutrition}
         conditioning={conditioning}
         workouts={workouts}
+        appleHealth={appleHealth}
         dateRange={dateRange}
       />
     </div>
@@ -3015,7 +3038,7 @@ const App = () => {
       const result = await res.json();
       if (result.success) {
         alert('JSON sync endpoint working! You can now use the Apple Shortcut.');
-        fetchData(); // Refresh data to show the test sync
+        handleRefresh(); // Refresh data to show the test sync
       } else {
         alert('Error: ' + result.error);
       }

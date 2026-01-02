@@ -1362,16 +1362,30 @@ app.post('/api/apple-health/json', express.json({ limit: '50mb' }), async (req, 
 
     // Process Weight Records
     if (payload.weight && Array.isArray(payload.weight)) {
+      console.log('Raw weight data sample:', JSON.stringify(payload.weight[0]));
+
       const validWeights = payload.weight
+        .map(w => {
+          // Handle multiple field name formats from Apple Shortcuts
+          const value = w.value ?? w.Value ?? w.qty ?? w.Qty ?? w.quantity ?? w.Quantity;
+          const date = w.date ?? w.Date ?? w.startDate ?? w['Start Date'] ?? w.Start_Date ?? w.start_date;
+
+          console.log(`Weight record: value=${value}, date=${date}`);
+
+          return {
+            value: parseFloat(value),
+            date: date || new Date().toISOString(),
+            source: w.source || w.Source || 'Apple Health',
+          };
+        })
         .filter(w => w.value && w.value >= 40 && w.value <= 200)
-        .map(w => ({
-          date: w.date || w.startDate || new Date().toISOString(),
-          value: parseFloat(w.value),
-          source: w.source || 'Apple Health',
-        }))
         .sort((a, b) => new Date(b.date) - new Date(a.date));
 
+      console.log(`Valid weights after filtering: ${validWeights.length}`);
+
       if (validWeights.length > 0) {
+        console.log(`Latest weight: ${validWeights[0].value} kg from ${validWeights[0].date}`);
+
         // Update current weight
         data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
         data.measurements.current.weight = validWeights[0].value;
@@ -1403,14 +1417,21 @@ app.post('/api/apple-health/json', express.json({ limit: '50mb' }), async (req, 
     // Process Body Fat Records
     if (payload.bodyFat && Array.isArray(payload.bodyFat)) {
       const validBodyFat = payload.bodyFat
-        .filter(bf => bf.value && bf.value > 0 && bf.value < 50)
-        .map(bf => ({
-          date: bf.date || bf.startDate || new Date().toISOString(),
+        .map(bf => {
+          const value = bf.value ?? bf.Value ?? bf.qty ?? bf.Qty ?? bf.quantity;
+          const date = bf.date ?? bf.Date ?? bf.startDate ?? bf['Start Date'];
           // Apple Health stores as decimal (0.25), convert to percentage (25)
-          value: bf.value < 1 ? bf.value * 100 : bf.value,
-          source: bf.source || 'Apple Health',
-        }))
+          const percentValue = value && value < 1 ? value * 100 : value;
+          return {
+            value: parseFloat(percentValue),
+            date: date || new Date().toISOString(),
+            source: bf.source || bf.Source || 'Apple Health',
+          };
+        })
+        .filter(bf => bf.value && bf.value > 0 && bf.value < 50)
         .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      console.log(`Valid body fat records: ${validBodyFat.length}`);
 
       if (validBodyFat.length > 0) {
         data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
@@ -1600,9 +1621,21 @@ app.post('/api/apple-health/json', express.json({ limit: '50mb' }), async (req, 
 
     // Process Active Calories (daily totals)
     if (payload.activeCalories && Array.isArray(payload.activeCalories)) {
+      console.log('Raw activeCalories sample:', JSON.stringify(payload.activeCalories[0]));
+
       const calRecords = payload.activeCalories
+        .map(c => {
+          const value = c.value ?? c.Value ?? c.qty ?? c.Qty ?? c.quantity;
+          const date = c.date ?? c.Date ?? c.startDate ?? c['Start Date'];
+          return {
+            value: parseFloat(value),
+            date: date || new Date().toISOString(),
+          };
+        })
         .filter(c => c.value && c.value > 0)
-        .sort((a, b) => new Date(b.date || b.startDate) - new Date(a.date || a.startDate));
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+      console.log(`Valid active calories records: ${calRecords.length}`);
 
       if (calRecords.length > 0) {
         data.appleHealth = data.appleHealth || {};
@@ -1610,19 +1643,40 @@ app.post('/api/apple-health/json', express.json({ limit: '50mb' }), async (req, 
         data.appleHealth.avgActiveCalories = Math.round(
           last7.reduce((sum, c) => sum + c.value, 0) / last7.length
         );
+
+        // Store daily active calories for calorie balance calculation
+        data.appleHealth.dailyActiveCalories = data.appleHealth.dailyActiveCalories || {};
+        calRecords.forEach(c => {
+          const dateKey = new Date(c.date).toISOString().split('T')[0];
+          data.appleHealth.dailyActiveCalories[dateKey] = Math.round(c.value);
+        });
+
+        console.log(`Stored active calories for ${Object.keys(data.appleHealth.dailyActiveCalories).length} days`);
       }
     }
 
     // Process Dietary Calories (from MacroFactor etc.)
     if (payload.dietaryCalories && Array.isArray(payload.dietaryCalories)) {
+      console.log('Raw dietary calories sample:', JSON.stringify(payload.dietaryCalories[0]));
+
       data.nutrition = data.nutrition || { dailyCalorieIntake: {} };
 
       payload.dietaryCalories.forEach(dc => {
-        const dateKey = (dc.date || dc.startDate)?.split('T')[0];
-        if (dateKey && dc.value) {
-          data.nutrition.dailyCalorieIntake[dateKey] = Math.round(dc.value);
+        const value = dc.value ?? dc.Value ?? dc.qty ?? dc.Qty ?? dc.quantity;
+        const date = dc.date ?? dc.Date ?? dc.startDate ?? dc['Start Date'];
+
+        if (value && date) {
+          const dateKey = new Date(date).toISOString().split('T')[0];
+          const calories = Math.round(parseFloat(value));
+
+          if (calories > 0) {
+            console.log(`Dietary calories for ${dateKey}: ${calories}`);
+            data.nutrition.dailyCalorieIntake[dateKey] = calories;
+          }
         }
       });
+
+      console.log('Dietary calories stored:', Object.keys(data.nutrition.dailyCalorieIntake).length, 'days');
     }
 
     // Process FitnessView CSV
