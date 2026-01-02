@@ -11,7 +11,8 @@
       "Bash(node -e:*)",
       "Bash(node test-parse.js)",
       "Bash(git reset:*)",
-      "Bash(ping:*)"
+      "Bash(ping:*)",
+      "Bash(curl:*)"
     ]
   }
 }

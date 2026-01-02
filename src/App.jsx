@@ -838,8 +838,12 @@ const WeightTrendSection = ({ weightData, trendChange }) => {
   const max = Math.max(...weights);
   const range = max - min || 1;
 
+  // First and last weights for display
+  const firstWeight = weights[0]; // Oldest
+  const lastWeight = weights[weights.length - 1]; // Newest (current)
+
   // Determine if trend is good or bad (assuming cutting goal - weight loss is good)
-  const isGoodTrend = trendChange < 0; // For cutting: losing weight is good
+  const isGoodTrend = trendChange <= 0; // For cutting: losing weight is good
   const borderColor = isGoodTrend ? 'border-green-500/30' : 'border-red-500/30';
   const bgColor = isGoodTrend ? 'from-green-500/10 to-green-600/5' : 'from-red-500/10 to-red-600/5';
   const lineColor = isGoodTrend ? '#22c55e' : '#ef4444';
@@ -870,8 +874,8 @@ const WeightTrendSection = ({ weightData, trendChange }) => {
         <circle cx={parseFloat(points[points.length-1]?.split(',')[0]) || 0} cy={parseFloat(points[points.length-1]?.split(',')[1]) || 0} r="4" fill={lineColor}/>
       </svg>
       <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-        <span>{min.toFixed(1)} kg</span>
-        <span>{max.toFixed(1)} kg</span>
+        <span>{firstWeight.toFixed(1)} kg</span>
+        <span>{lastWeight.toFixed(1)} kg</span>
       </div>
     </div>
   );
@@ -919,10 +923,21 @@ const MeasurementsCard = ({ measurements }) => {
   // Valid adult weight range: 40-200 kg
   const weightData = history
     .filter(h => h.weight && h.weight >= 40 && h.weight <= 200)
-    .slice(0, 30)
-    .reverse();
+    .sort((a, b) => new Date(a.date) - new Date(b.date)) // Sort OLDEST first
+    .slice(-30); // Get last 30 entries (most recent 30)
+
   const hasWeightTrend = weightData.length >= 2;
-  const weightTrendChange = hasWeightTrend ? weightData[weightData.length - 1].weight - weightData[0].weight : 0;
+  // Calculate change: newest - oldest (last - first)
+  const firstWeight = hasWeightTrend ? weightData[0].weight : 0; // Oldest
+  const lastWeight = hasWeightTrend ? weightData[weightData.length - 1].weight : 0; // Newest (current)
+  const weightTrendChange = lastWeight - firstWeight; // Positive = gained, Negative = lost
+
+  console.log('Weight Trend Debug:', {
+    firstWeight,
+    lastWeight,
+    change: weightTrendChange,
+    dataPoints: weightData.length
+  });
 
   return (
     <div className="card h-full">
@@ -1029,19 +1044,22 @@ const MeasurementsCard = ({ measurements }) => {
 // CALORIE INSIGHT COMPONENT
 // ============================================
 const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
-  // Calculate calories consumed (from nutrition.dailyCalorieIntake)
   const dailyIntake = nutrition?.dailyCalorieIntake || {};
 
-  // Filter by date range
   const now = new Date();
-  const daysBack = dateRange === '7D' ? 7 : dateRange === '30D' ? 30 : dateRange === '90D' ? 90 : 7;
+  const daysMap = { '7D': 7, '30D': 30, '90D': 90, '1Y': 365, 'All': 9999 };
+  const daysBack = daysMap[dateRange] || 7;
   const startDate = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000);
 
-  const consumedCalories = Object.entries(dailyIntake)
+  // Get daily entries within date range
+  const dailyEntries = Object.entries(dailyIntake)
     .filter(([date]) => new Date(date) >= startDate)
-    .reduce((sum, [_, cal]) => sum + (cal || 0), 0);
+    .sort((a, b) => new Date(b[0]) - new Date(a[0])) // Newest first
+    .slice(0, 7); // Show last 7 days max
 
-  // Calculate calories burned (from workouts + conditioning)
+  const consumedCalories = dailyEntries.reduce((sum, [_, cal]) => sum + (cal || 0), 0);
+
+  // Calculate burned calories
   const workoutCalories = (workouts || [])
     .filter(w => new Date(w.start_time) >= startDate)
     .reduce((sum, w) => sum + (w.appleHealth?.activeCalories || 0), 0);
@@ -1052,25 +1070,26 @@ const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
 
   const burnedCalories = workoutCalories + conditioningCalories;
 
-  // Calculate balance
   const balance = consumedCalories - burnedCalories;
-  const dailyAvgBalance = balance / daysBack;
+  const avgDailyIntake = dailyEntries.length > 0
+    ? Math.round(consumedCalories / dailyEntries.length)
+    : 0;
+  const avgDailyBurn = Math.round(burnedCalories / daysBack);
 
-  // Estimate weekly weight change (3500 cal = ~0.45kg)
-  const weeklyWeightChange = (dailyAvgBalance * 7) / 7700; // 7700 cal = 1kg
+  // Weekly weight change estimate (7700 cal = 1kg)
+  const weeklyWeightChange = (balance / dailyEntries.length * 7) / 7700;
 
-  // Determine goal status
+  // Goal status based on balance
   const getGoalStatus = () => {
-    if (dailyAvgBalance < -300) return { label: 'Cutting', color: 'text-red-400', icon: '🔥' };
-    if (dailyAvgBalance > 300) return { label: 'Bulking', color: 'text-green-400', icon: '💪' };
+    const dailyBalance = balance / (dailyEntries.length || 1);
+    if (dailyBalance < -300) return { label: 'Cutting', color: 'text-red-400', icon: '🔥' };
+    if (dailyBalance > 300) return { label: 'Bulking', color: 'text-green-400', icon: '💪' };
     return { label: 'Maintaining', color: 'text-blue-400', icon: '⚖️' };
   };
 
   const goal = getGoalStatus();
 
-  if (consumedCalories === 0 && burnedCalories === 0) {
-    return null; // Don't show if no data
-  }
+  if (consumedCalories === 0 && burnedCalories === 0) return null;
 
   return (
     <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 mt-4">
@@ -1086,6 +1105,14 @@ const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
             <span className="text-green-400">{Math.round(consumedCalories).toLocaleString()} kcal</span>
           </div>
         )}
+
+        {avgDailyIntake > 0 && (
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-500">Daily Avg</span>
+            <span className="text-slate-400">{avgDailyIntake.toLocaleString()} kcal/day</span>
+          </div>
+        )}
+
         <div className="flex justify-between">
           <span className="text-slate-400">Burned (exercise)</span>
           <span className="text-red-400">{Math.round(burnedCalories).toLocaleString()} kcal</span>
@@ -1094,12 +1121,14 @@ const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
         {consumedCalories > 0 && (
           <>
             <div className="border-t border-slate-700 my-2"></div>
+
             <div className="flex justify-between font-medium">
-              <span className="text-slate-300">Balance</span>
+              <span className="text-slate-300">Net Balance</span>
               <span className={balance < 0 ? 'text-red-400' : 'text-green-400'}>
                 {balance > 0 ? '+' : ''}{Math.round(balance).toLocaleString()} kcal
               </span>
             </div>
+
             <div className="flex justify-between text-xs">
               <span className="text-slate-500">Est. weekly change</span>
               <span className={weeklyWeightChange < 0 ? 'text-red-400' : 'text-green-400'}>
@@ -1107,13 +1136,30 @@ const CalorieInsight = ({ nutrition, conditioning, workouts, dateRange }) => {
               </span>
             </div>
 
-            <div className="mt-3 flex items-center justify-center gap-2 py-2 rounded-lg bg-slate-900/50">
+            <div className="mt-3 flex items-center justify-center gap-2 py-2 bg-slate-900/50 rounded-lg">
               <span className="text-lg">{goal.icon}</span>
               <span className={`font-medium ${goal.color}`}>{goal.label}</span>
             </div>
           </>
         )}
       </div>
+
+      {/* Daily Breakdown - Last 7 days */}
+      {dailyEntries.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-slate-700">
+          <div className="text-xs text-slate-500 mb-2">Daily Intake (Last {dailyEntries.length} days)</div>
+          <div className="space-y-1">
+            {dailyEntries.slice(0, 5).map(([date, calories]) => (
+              <div key={date} className="flex justify-between text-xs">
+                <span className="text-slate-500">
+                  {new Date(date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                </span>
+                <span className="text-slate-300">{Math.round(calories).toLocaleString()} kcal</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

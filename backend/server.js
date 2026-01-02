@@ -1625,6 +1625,59 @@ app.post('/api/apple-health/json', express.json({ limit: '50mb' }), async (req, 
       });
     }
 
+    // Process FitnessView CSV
+    if (payload.workoutCSV && typeof payload.workoutCSV === 'string') {
+      try {
+        // FitnessView CSV format parsing
+        const lines = payload.workoutCSV.trim().split('\n');
+        if (lines.length > 1) {
+          const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+
+          const workouts = lines.slice(1).map(line => {
+            const values = line.split(',').map(v => v.trim());
+            const workout = {};
+
+            headers.forEach((header, i) => {
+              workout[header] = values[i];
+            });
+
+            return {
+              date: workout.date || workout.startdate || null,
+              type: workout.type || workout.workouttype || 'Workout',
+              duration: parseFloat(workout.duration || 0) * 60, // minutes to seconds
+              activeCalories: parseFloat(workout.activecalories || workout.calories || 0),
+              avgHeartRate: parseFloat(workout.avgheartrate || workout.averageheartrate || 0),
+              maxHeartRate: parseFloat(workout.maxheartrate || workout.maximumheartrate || 0),
+              distance: parseFloat(workout.distance || 0),
+            };
+          }).filter(w => w.date && w.duration > 0);
+
+          console.log(`Parsed ${workouts.length} workouts from FitnessView CSV`);
+
+          // Merge into conditioning
+          data.conditioning = data.conditioning || [];
+          workouts.forEach(w => {
+            const isDuplicate = data.conditioning.some(
+              c => c.date?.split('T')[0] === w.date?.split('T')[0] && c.type === w.type
+            );
+            if (!isDuplicate) {
+              data.conditioning.push({
+                id: `fitnessview-${w.date}-${Math.random().toString(36).substr(2, 9)}`,
+                ...w,
+                category: 'other',
+                source: 'FitnessView',
+              });
+            }
+          });
+
+          // Sort conditioning by date
+          data.conditioning.sort((a, b) => new Date(b.date) - new Date(a.date));
+        }
+      } catch (error) {
+        console.error('Error parsing FitnessView CSV:', error);
+      }
+    }
+
     // Update sync timestamp
     data.lastSync = new Date().toISOString();
     data.lastSyncSource = 'Apple Shortcut';
