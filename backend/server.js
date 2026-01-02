@@ -973,16 +973,25 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
     // Read existing data
     const data = readData();
 
-    // Merge strength workout data with existing Hevy workouts by date
-    console.log(`Merging Apple Health data with ${data.workouts.length} Hevy workouts...`);
-    data.workouts = data.workouts.map(workout => {
-      const dateKey = workout.start_time.split('T')[0];
-      const appleData = processed.strengthWorkoutData[dateKey];
+    // Keep ALL existing Hevy workouts (source: 'hevy' or has exercises array)
+    const existingHevyWorkouts = (data.workouts || []).filter(w =>
+      w.source === 'hevy' ||
+      w.source === 'Hevy' ||
+      (w.exercises && w.exercises.length > 0) ||
+      w.id?.startsWith('hevy-')
+    );
+
+    console.log(`Preserving ${existingHevyWorkouts.length} Hevy workouts`);
+
+    // MERGE: Add Apple Health data to Hevy workouts by date
+    const mergedWorkouts = existingHevyWorkouts.map(hevyWorkout => {
+      const workoutDate = hevyWorkout.start_time?.split('T')[0];
+      const appleData = processed.strengthWorkoutData[workoutDate];
 
       if (appleData) {
-        console.log(`Merging Apple Health data for workout on ${dateKey}`);
+        console.log(`Merged Apple Health data with Hevy workout on ${workoutDate}`);
         return {
-          ...workout,
+          ...hevyWorkout,
           appleHealth: {
             duration: appleData.duration,
             activeCalories: appleData.activeCalories,
@@ -992,15 +1001,35 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
           }
         };
       }
-      return workout;
+
+      return hevyWorkout;
     });
+
+    // Final workouts = merged Hevy workouts
+    data.workouts = mergedWorkouts;
 
     // Log merge results
     const mergedCount = data.workouts.filter(w => w.appleHealth).length;
     console.log(`Merged Apple Health data with ${mergedCount} workouts`);
 
-    // Set conditioning sessions (sorted newest first)
-    data.conditioning = processed.conditioningSessions;
+    // Merge conditioning - avoid duplicates by date+type
+    const existingConditioning = data.conditioning || [];
+    const newConditioning = processed.conditioningSessions || [];
+
+    newConditioning.forEach(nc => {
+      const dateKey = nc.date?.split('T')[0];
+      const exists = existingConditioning.some(ec =>
+        ec.date?.split('T')[0] === dateKey &&
+        ec.type === nc.type
+      );
+      if (!exists) {
+        existingConditioning.push(nc);
+      }
+    });
+
+    data.conditioning = existingConditioning.sort((a, b) =>
+      new Date(b.date) - new Date(a.date)
+    );
 
     // Update resting heart rate if available
     if (processed.avgRestingHR) {
@@ -1142,12 +1171,24 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
 
       res.json({
         success: true,
+        preserved: {
+          hevyWorkouts: existingHevyWorkouts.length,
+          mergedWithAppleHealth: mergedCount
+        },
+        added: {
+          conditioning: newConditioning.filter(nc => {
+            const dateKey = nc.date?.split('T')[0];
+            return !(data.conditioning || []).some(ec =>
+              ec.date?.split('T')[0] === dateKey && ec.type === nc.type
+            );
+          }).length
+        },
         stats: {
           processingTimeSeconds: parseFloat(processingTime),
           fileSizeMB: parseFloat(fileSizeMB),
           linesProcessed: parsedData.stats.linesProcessed,
           workoutsFound: parsedData.stats.workoutsFound,
-          conditioningSessions: processed.conditioningSessions.length,
+          conditioningSessions: data.conditioning.length,
           strengthWorkoutsEnriched: Object.keys(processed.strengthWorkoutData).length,
           weightRecords: parsedData.stats.weightRecordsFound,
           bodyFatRecords: parsedData.stats.bodyFatRecordsFound,
@@ -1336,6 +1377,9 @@ app.post('/api/apple-health/csv/upload', upload.single('file'), async (req, res)
 // ============================================
 // APPLE HEALTH JSON API (Apple Shortcuts Integration)
 // ============================================
+// REMOVED: Simplified to use XML upload only
+// Use the Apple Health XML export from the Health app instead
+/*
 app.post('/api/apple-health/json', express.json({ limit: '50mb' }), async (req, res) => {
   try {
     console.log('Apple Health JSON upload received');
@@ -1771,6 +1815,7 @@ app.post('/api/apple-health/json', express.json({ limit: '50mb' }), async (req, 
     res.status(500).json({ error: error.message });
   }
 });
+*/
 
 // ============================================
 // AUTOMATIC HEVY SYNC (Backup - Every 15 minutes)

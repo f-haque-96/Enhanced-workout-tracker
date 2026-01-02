@@ -1,338 +1,337 @@
-## FIX: Critical Data Issues - fetchData Error, Conditioning Lost, Weight/Calories Wrong
+## CLEANUP & FIX: Remove Shortcut Logic, Fix Achievement Merge Bug, Simplify Upload
 
-### ISSUE 1: "fetchData is not defined" Error
+### TASK 1: Remove Unnecessary Upload Buttons from Menu
 
-Find and fix the undefined function reference:
-```bash
-ssh pi@192.168.1.73
-cd ~/hit-tracker-pro
+Remove these buttons from the MoreMenu/upload options:
+- "Test Shortcut Sync"
+- "Hevy Workout (JSON/CSV)"  
+- "Measurements (CSV)"
 
-# Find where fetchData is called but not defined
-grep -n "fetchData" src/App.jsx
-```
+**Keep only:**
+- "Apple Health (XML)" - main upload
+- "Reset All Data" - for clearing
 
-**Fix:** The function is likely called but not defined or named differently. Find the data loading function and ensure it's properly referenced:
+Find the menu component and remove the unwanted options:
 ```jsx
-// In App.jsx, find the data loading function
-// It might be called loadData, refreshData, or similar
+// In MoreMenu or wherever upload options are defined
+// REMOVE these menu items:
 
-// If there's a "Test Shortcut Sync" button calling fetchData:
-const handleTestShortcutSync = async () => {
-  try {
-    const testData = {
-      weight: [{ date: new Date().toISOString(), value: 80 }],
-    };
-    
-    const res = await fetch(`${API_BASE_URL}/apple-health/json`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-User-Id': 'fahim',
-      },
-      body: JSON.stringify(testData),
-    });
-    
-    const result = await res.json();
-    
-    if (result.success) {
-      alert('JSON sync endpoint working! Reloading data...');
-      // Call the actual data reload function - find its correct name
-      window.location.reload(); // Fallback: just reload the page
-    } else {
-      alert('Error: ' + result.error);
-    }
-  } catch (error) {
-    alert('Connection error: ' + error.message);
-  }
-};
+// ❌ Remove: Test Shortcut Sync
+// ❌ Remove: Hevy Workout JSON/CSV upload
+// ❌ Remove: Measurements CSV upload
 
-// OR if there IS a fetchData function, make sure it's defined:
-const fetchData = async () => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/data?_t=${Date.now()}`);
-    if (res.ok) {
-      const apiData = await res.json();
-      const normalized = normalizeApiData(apiData);
-      setData(normalized);
-    }
-  } catch (error) {
-    console.error('Fetch error:', error);
-  }
-};
+// ✅ Keep only:
+const uploadOptions = [
+  {
+    id: 'apple-health',
+    label: '🍎 Apple Health (XML)',
+    accept: '.xml',
+    endpoint: '/api/apple-health/upload',
+  },
+  {
+    id: 'reset',
+    label: '🗑️ Reset All Data',
+    action: handleReset,
+    isDestructive: true,
+  },
+];
 ```
 
 ---
 
-### ISSUE 2: "CONDITIONING DATA LOST DURING NORMALIZATION" 
+### TASK 2: Fix Achievement Reset Bug - Merge Don't Overwrite
 
-The console shows conditioning data exists in API but gets lost. Fix the normalization:
-```jsx
-// Find normalizeApiData function and fix it:
-
-const normalizeApiData = (raw) => {
-  if (!raw) {
-    console.error('normalizeApiData received null/undefined');
-    return null;
-  }
-  
-  console.log('Raw API data:', {
-    workouts: raw.workouts?.length || 0,
-    conditioning: raw.conditioning?.length || 0,
-    measurements: !!raw.measurements,
-  });
-  
-  // CRITICAL: Don't lose conditioning data!
-  const normalizedConditioning = (raw.conditioning || []).map(session => {
-    if (!session) return null;
-    
-    return {
-      ...session,
-      // Normalize date
-      date: session.date || session.startDate || session.Start_Date,
-      // Normalize calories - try multiple field names
-      activeCalories: session.activeCalories ?? session.calories ?? session.Calories ?? session.active_calories ?? 0,
-      // Normalize heart rate
-      avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? session.avg_heart_rate ?? session.hr_avg ?? 0,
-      maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? session.max_heart_rate ?? session.hr_max ?? 0,
-      // Normalize other fields
-      duration: session.duration ?? session.Duration ?? 0,
-      distance: session.distance ?? session.Distance ?? 0,
-      steps: session.steps ?? session.Steps ?? 0,
-      type: session.type ?? session.Type ?? session.workoutType ?? 'Unknown',
-    };
-  }).filter(s => s !== null);
-  
-  console.log('Normalized conditioning:', normalizedConditioning.length);
-  
-  const result = {
-    workouts: normalizeWorkouts(raw.workouts || []),
-    conditioning: normalizedConditioning, // Use the properly normalized data
-    measurements: normalizeMeasurements(raw.measurements || {}),
-    appleHealth: raw.appleHealth || {},
-    nutrition: raw.nutrition || { dailyCalorieIntake: {} },
-    lastSync: raw.lastSync,
-    lastWebhook: raw.lastWebhook,
-  };
-  
-  // Debug: verify conditioning wasn't lost
-  if (raw.conditioning?.length > 0 && result.conditioning.length === 0) {
-    console.error('❌ CONDITIONING DATA WAS LOST!');
-    console.error('Raw conditioning sample:', raw.conditioning[0]);
-    // Emergency fallback - just use raw data
-    result.conditioning = raw.conditioning;
-  }
-  
-  return result;
-};
-
-// Also check if there's a separate normalizeConditioning function that's broken:
-const normalizeConditioning = (raw) => {
-  if (!raw) return [];
-  if (!Array.isArray(raw)) {
-    console.error('normalizeConditioning: input is not array:', typeof raw);
-    return [];
-  }
-  
-  return raw.map(session => ({
-    ...session,
-    date: session.date || session.startDate,
-    activeCalories: session.activeCalories ?? session.calories ?? 0,
-    avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? 0,
-    maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? 0,
-    duration: session.duration ?? 0,
-    distance: session.distance ?? 0,
-    steps: session.steps ?? 0,
-  })).filter(s => s !== null && s !== undefined);
-};
-```
-
----
-
-### ISSUE 3: Weight Not Updating from Shortcut (80 vs 82.3)
-
-The Apple Shortcut sends data in a specific format. Check and fix the parsing:
-```bash
-# Check what the Shortcut is actually sending
-docker compose logs backend --tail=100 | grep -A 5 "Apple Health JSON"
-```
-
-**Fix the backend to handle Apple Shortcuts format:**
-
-The data from Apple Shortcuts looks different than expected. Update the endpoint:
+The Apple Health upload is overwriting Hevy workouts instead of merging. Fix in backend:
 ```javascript
-// In backend/server.js - /api/apple-health/json endpoint
+// In backend/server.js - Apple Health upload endpoint
+// Find the section that processes workouts
 
-// Apple Shortcuts sends data in this format:
-// { weight: [ {Value: 82.3, Start Date: "2026-01-02 08:30:00 +0000", ...} ] }
+// WRONG - This overwrites:
+// data.workouts = parsedWorkouts;
 
-// Process Weight Records - handle multiple formats
-if (payload.weight && Array.isArray(payload.weight)) {
-  console.log('Raw weight data sample:', JSON.stringify(payload.weight[0]));
-  
-  const validWeights = payload.weight
-    .map(w => {
-      // Try multiple field name formats
-      const value = w.value ?? w.Value ?? w.qty ?? w.Qty ?? w.quantity ?? w.Quantity;
-      const date = w.date ?? w.Date ?? w.startDate ?? w['Start Date'] ?? w.Start_Date ?? w.start_date;
-      
-      console.log(`Weight record: value=${value}, date=${date}`);
-      
-      return { value: parseFloat(value), date };
-    })
-    .filter(w => w.value && w.value >= 40 && w.value <= 200 && w.date)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
-  
-  console.log(`Valid weights after filtering: ${validWeights.length}`);
-  
-  if (validWeights.length > 0) {
-    console.log(`Latest weight: ${validWeights[0].value} kg from ${validWeights[0].date}`);
+// CORRECT - Merge by checking for duplicates:
+app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => {
+  try {
+    // ... parsing logic ...
     
-    data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
-    data.measurements.current.weight = validWeights[0].value;
+    // Read EXISTING data first
+    const data = readData();
     
-    // Also update history
-    validWeights.forEach(w => {
-      const dateKey = new Date(w.date).toISOString().split('T')[0];
-      const exists = (data.measurements.history || []).some(h => 
-        h.date?.includes(dateKey)
-      );
-      if (!exists) {
-        data.measurements.history = data.measurements.history || [];
-        data.measurements.history.push({
-          date: new Date(w.date).toISOString(),
-          weight: w.value,
-        });
-      }
-    });
-    
-    // Sort and limit history
-    data.measurements.history = (data.measurements.history || [])
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, 90);
-  }
-}
-```
-
----
-
-### ISSUE 4: Calories Burned = 0
-
-The active calories from Shortcut aren't being stored or displayed:
-```javascript
-// In backend - /api/apple-health/json endpoint
-// Fix active calories parsing:
-
-if (payload.activeCalories && Array.isArray(payload.activeCalories)) {
-  console.log('Raw activeCalories sample:', JSON.stringify(payload.activeCalories[0]));
-  
-  const calRecords = payload.activeCalories
-    .map(c => {
-      const value = c.value ?? c.Value ?? c.qty ?? c.Qty ?? c.quantity;
-      const date = c.date ?? c.Date ?? c.startDate ?? c['Start Date'];
-      return { value: parseFloat(value), date };
-    })
-    .filter(c => c.value && c.value > 0 && c.date)
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
-  
-  console.log(`Valid active calories records: ${calRecords.length}`);
-  
-  if (calRecords.length > 0) {
-    data.appleHealth = data.appleHealth || {};
-    data.appleHealth.avgActiveCalories = Math.round(
-      calRecords.slice(0, 7).reduce((sum, c) => sum + c.value, 0) / 
-      Math.min(calRecords.length, 7)
+    // Keep ALL existing Hevy workouts (source: 'hevy' or has exercises array)
+    const existingHevyWorkouts = (data.workouts || []).filter(w => 
+      w.source === 'hevy' || 
+      w.source === 'Hevy' || 
+      (w.exercises && w.exercises.length > 0) ||
+      w.id?.startsWith('hevy-')
     );
     
-    // Also store daily active calories for calorie balance calculation
-    data.appleHealth.dailyActiveCalories = data.appleHealth.dailyActiveCalories || {};
-    calRecords.forEach(c => {
-      const dateKey = new Date(c.date).toISOString().split('T')[0];
-      data.appleHealth.dailyActiveCalories[dateKey] = Math.round(c.value);
+    console.log(`Preserving ${existingHevyWorkouts.length} Hevy workouts`);
+    
+    // Parse Apple Health workouts (strength training for HR/calories)
+    const appleHealthWorkouts = parseAppleHealthWorkouts(xmlContent);
+    
+    // MERGE: Try to match Apple Health data to Hevy workouts by date
+    const mergedWorkouts = existingHevyWorkouts.map(hevyWorkout => {
+      const workoutDate = hevyWorkout.start_time?.split('T')[0];
+      
+      // Find matching Apple Health workout on same day
+      const matchingApple = appleHealthWorkouts.find(aw => {
+        const appleDate = aw.date?.split('T')[0];
+        return appleDate === workoutDate && 
+               (aw.type?.toLowerCase().includes('strength') || 
+                aw.type?.toLowerCase().includes('training'));
+      });
+      
+      if (matchingApple) {
+        console.log(`Merged Apple Health data with Hevy workout on ${workoutDate}`);
+        return {
+          ...hevyWorkout,
+          appleHealth: {
+            duration: matchingApple.duration,
+            activeCalories: matchingApple.activeCalories,
+            avgHeartRate: matchingApple.avgHeartRate,
+            maxHeartRate: matchingApple.maxHeartRate,
+          }
+        };
+      }
+      
+      return hevyWorkout;
     });
     
-    console.log(`Stored active calories for ${Object.keys(data.appleHealth.dailyActiveCalories).length} days`);
+    // Keep Apple Health workouts that DON'T match any Hevy workout (cardio, etc.)
+    const unmatchedAppleWorkouts = appleHealthWorkouts.filter(aw => {
+      const appleDate = aw.date?.split('T')[0];
+      const hasMatch = existingHevyWorkouts.some(hw => 
+        hw.start_time?.split('T')[0] === appleDate
+      );
+      return !hasMatch && !aw.type?.toLowerCase().includes('strength');
+    });
+    
+    // Final workouts = merged Hevy + unmatched cardio from Apple Health
+    data.workouts = mergedWorkouts;
+    
+    // Conditioning = Apple Health cardio workouts (walking, running, etc.)
+    // MERGE with existing, don't overwrite
+    const existingConditioning = data.conditioning || [];
+    const newConditioning = unmatchedAppleWorkouts.map(w => ({
+      id: `apple-${w.date}-${Math.random().toString(36).substr(2, 9)}`,
+      type: w.type,
+      category: w.category,
+      date: w.date,
+      duration: w.duration,
+      activeCalories: w.activeCalories,
+      avgHeartRate: w.avgHeartRate,
+      maxHeartRate: w.maxHeartRate,
+      distance: w.distance,
+      steps: w.steps,
+      source: 'Apple Health',
+    }));
+    
+    // Merge conditioning - avoid duplicates by date+type
+    newConditioning.forEach(nc => {
+      const dateKey = nc.date?.split('T')[0];
+      const exists = existingConditioning.some(ec => 
+        ec.date?.split('T')[0] === dateKey && 
+        ec.type === nc.type
+      );
+      if (!exists) {
+        existingConditioning.push(nc);
+      }
+    });
+    
+    data.conditioning = existingConditioning.sort((a, b) => 
+      new Date(b.date) - new Date(a.date)
+    );
+    
+    // Process measurements, sleep, etc. (these can overwrite as they're point-in-time)
+    // ... rest of processing ...
+    
+    data.lastSync = new Date().toISOString();
+    writeData(data);
+    
+    res.json({
+      success: true,
+      preserved: {
+        hevyWorkouts: existingHevyWorkouts.length,
+        mergedWithAppleHealth: mergedWorkouts.filter(w => w.appleHealth).length,
+      },
+      added: {
+        conditioning: newConditioning.length,
+      }
+    });
+    
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({ error: error.message });
   }
-}
-```
-
-**Also update the frontend CalorieInsight to use the new data:**
-```jsx
-const CalorieInsight = ({ nutrition, conditioning, workouts, appleHealth, dateRange }) => {
-  // Get daily intake
-  const dailyIntake = nutrition?.dailyCalorieIntake || {};
-  
-  // Get daily active calories from appleHealth (from Shortcut)
-  const dailyActiveCalories = appleHealth?.dailyActiveCalories || {};
-  
-  // Calculate burned calories
-  const now = new Date();
-  const daysMap = { '7D': 7, '30D': 30, '90D': 90, '1Y': 365, 'All': 9999 };
-  const daysBack = daysMap[dateRange] || 7;
-  const startDate = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000);
-  
-  // Sum active calories from Apple Health Shortcut data
-  const burnedFromShortcut = Object.entries(dailyActiveCalories)
-    .filter(([date]) => new Date(date) >= startDate)
-    .reduce((sum, [_, cal]) => sum + cal, 0);
-  
-  // Sum calories from conditioning sessions
-  const burnedFromConditioning = (conditioning || [])
-    .filter(c => new Date(c.date) >= startDate)
-    .reduce((sum, c) => sum + (c.activeCalories || c.calories || 0), 0);
-  
-  // Sum calories from workouts with Apple Health data
-  const burnedFromWorkouts = (workouts || [])
-    .filter(w => new Date(w.start_time) >= startDate)
-    .reduce((sum, w) => sum + (w.appleHealth?.activeCalories || 0), 0);
-  
-  // Total burned = max of (Shortcut data) or (conditioning + workouts)
-  // Use Shortcut data if available as it's more comprehensive
-  const burnedCalories = burnedFromShortcut > 0 
-    ? burnedFromShortcut 
-    : (burnedFromConditioning + burnedFromWorkouts);
-  
-  console.log('Calorie calculation:', {
-    burnedFromShortcut,
-    burnedFromConditioning,
-    burnedFromWorkouts,
-    totalBurned: burnedCalories,
-  });
-  
-  // ... rest of component
-};
+});
 ```
 
 ---
 
-### ISSUE 5: Dietary Calories Inaccurate
+### TASK 3: Remove Shortcut-Related Backend Code (Optional Cleanup)
 
-Check and fix dietary calorie parsing:
+You can keep or remove the JSON endpoint. If removing:
 ```javascript
-// In backend - /api/apple-health/json endpoint
+// In backend/server.js
+// Comment out or remove:
+// app.post('/api/apple-health/json', ...) 
+```
 
-if (payload.dietaryCalories && Array.isArray(payload.dietaryCalories)) {
-  console.log('Raw dietary calories sample:', JSON.stringify(payload.dietaryCalories[0]));
+---
+
+### TASK 4: Replace Measurements Card with Health Score Card
+
+Replace the Measurements card (Waist, Chest, Shoulders) with a more insightful **Health Score** card:
+```jsx
+// New HealthScoreCard component
+const HealthScoreCard = ({ measurements, appleHealth, conditioning, workouts }) => {
+  // Calculate component scores (0-100 each)
   
-  data.nutrition = data.nutrition || { dailyCalorieIntake: {} };
+  // 1. Sleep Score
+  const sleepAvg = appleHealth?.sleepAvg || 0;
+  const sleepScore = sleepAvg >= 7 ? 100 : sleepAvg >= 6 ? 75 : sleepAvg >= 5 ? 50 : 25;
   
-  payload.dietaryCalories.forEach(dc => {
-    const value = dc.value ?? dc.Value ?? dc.qty ?? dc.Qty ?? dc.quantity;
-    const date = dc.date ?? dc.Date ?? dc.startDate ?? dc['Start Date'];
-    
-    if (value && date) {
-      const dateKey = new Date(date).toISOString().split('T')[0];
-      const calories = Math.round(parseFloat(value));
-      
-      // Only update if we have a valid value
-      if (calories > 0) {
-        console.log(`Dietary calories for ${dateKey}: ${calories}`);
-        data.nutrition.dailyCalorieIntake[dateKey] = calories;
-      }
-    }
-  });
+  // 2. Activity Score (based on recent workouts)
+  const recentWorkouts = [...(workouts || []), ...(conditioning || [])]
+    .filter(w => {
+      const date = new Date(w.start_time || w.date);
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      return date >= weekAgo;
+    }).length;
+  const activityScore = Math.min(100, recentWorkouts * 20); // 5 workouts = 100
   
-  console.log('Dietary calories stored:', data.nutrition.dailyCalorieIntake);
-}
+  // 3. Heart Health Score (resting HR)
+  const restingHR = appleHealth?.restingHeartRate || 70;
+  const hrScore = restingHR <= 55 ? 100 : restingHR <= 65 ? 85 : restingHR <= 75 ? 70 : 50;
+  
+  // 4. Consistency Score (workouts per week average)
+  const totalWorkouts = (workouts?.length || 0) + (conditioning?.length || 0);
+  const weeksTracked = Math.max(1, Math.ceil(totalWorkouts / 4)); // Rough estimate
+  const avgPerWeek = totalWorkouts / weeksTracked;
+  const consistencyScore = Math.min(100, avgPerWeek * 25); // 4/week = 100
+  
+  // Overall Health Score (weighted average)
+  const overallScore = Math.round(
+    (sleepScore * 0.25) +
+    (activityScore * 0.30) +
+    (hrScore * 0.20) +
+    (consistencyScore * 0.25)
+  );
+  
+  const getScoreColor = (score) => {
+    if (score >= 80) return 'text-green-400';
+    if (score >= 60) return 'text-yellow-400';
+    if (score >= 40) return 'text-orange-400';
+    return 'text-red-400';
+  };
+  
+  const getScoreLabel = (score) => {
+    if (score >= 80) return 'Excellent';
+    if (score >= 60) return 'Good';
+    if (score >= 40) return 'Fair';
+    return 'Needs Work';
+  };
+  
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Activity className="w-4 h-4 text-green-400" />
+          Health Score
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {/* Overall Score */}
+        <div className="text-center mb-4">
+          <div className={`text-4xl font-bold ${getScoreColor(overallScore)}`}>
+            {overallScore}
+          </div>
+          <div className={`text-sm ${getScoreColor(overallScore)}`}>
+            {getScoreLabel(overallScore)}
+          </div>
+        </div>
+        
+        {/* Component Scores */}
+        <div className="space-y-3">
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-slate-400 flex items-center gap-2">
+              <Moon className="w-3 h-3" /> Sleep
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full ${sleepScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  style={{ width: `${sleepScore}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-8">{sleepScore}</span>
+            </div>
+          </div>
+          
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-slate-400 flex items-center gap-2">
+              <Dumbbell className="w-3 h-3" /> Activity
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full ${activityScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  style={{ width: `${activityScore}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-8">{activityScore}</span>
+            </div>
+          </div>
+          
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-slate-400 flex items-center gap-2">
+              <Heart className="w-3 h-3" /> Heart
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full ${hrScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  style={{ width: `${hrScore}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-8">{hrScore}</span>
+            </div>
+          </div>
+          
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-slate-400 flex items-center gap-2">
+              <Target className="w-3 h-3" /> Consistency
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full ${consistencyScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  style={{ width: `${consistencyScore}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-8">{consistencyScore}</span>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+```
+
+**Replace in the layout:**
+```jsx
+{/* OLD: */}
+{/* <MeasurementsCard measurements={data.measurements} /> */}
+
+{/* NEW: */}
+<HealthScoreCard 
+  measurements={data.measurements}
+  appleHealth={data.appleHealth}
+  conditioning={data.conditioning}
+  workouts={data.workouts}
+/>
 ```
 
 ---
@@ -340,7 +339,7 @@ if (payload.dietaryCalories && Array.isArray(payload.dietaryCalories)) {
 ### DEPLOYMENT
 ```bash
 git add -A
-git commit -m "Fix: fetchData error, conditioning normalization, weight/calorie parsing from Shortcuts"
+git commit -m "Fix: Achievement merge bug, remove shortcut buttons, replace measurements with health score"
 git push origin main
 
 ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && git pull && docker compose down && docker compose up -d --build"
@@ -349,21 +348,8 @@ ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && git pull && docker compose down && 
 ### VERIFICATION
 
 After deployment:
-
-1. **Check backend logs when Shortcut runs:**
-```bash
-ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && docker compose logs backend --tail=100"
-```
-Look for:
-- `Raw weight data sample:` - shows what Shortcut is sending
-- `Latest weight: X kg` - confirms parsing worked
-- `Valid active calories records: X` - confirms calories received
-
-2. **Run Shortcut again** and check dashboard updates
-
-3. **Check data file:**
-```bash
-ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && docker compose exec backend cat /app/data/fitness-data.json | python3 -c \"import sys,json; d=json.load(sys.stdin); print('Weight:', d.get('measurements',{}).get('current',{}).get('weight')); print('Active cal:', d.get('appleHealth',{}).get('dailyActiveCalories',{}))\""
-```
-
-4. **Test Shortcut Sync button** - should not show "fetchData is not defined" error
+1. [ ] Upload Apple Health XML
+2. [ ] Check achievements - should KEEP existing + add new (not reset)
+3. [ ] Menu only shows "Apple Health (XML)" and "Reset"
+4. [ ] Health Score card shows instead of Measurements
+5. [ ] Hevy workouts preserved after XML upload

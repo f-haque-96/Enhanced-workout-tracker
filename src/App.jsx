@@ -761,7 +761,7 @@ const ConditioningIcon = ({ type, size = 16, className = '' }) => {
   return <Icon size={size} className={className} />;
 };
 
-const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth, onUploadAppleHealthCSV, onExportJson, onExportCsv, onReset, onTestJsonSync }) => {
+const MoreMenu = ({ onUploadAppleHealth, onExportJson, onExportCsv, onReset }) => {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => { const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
@@ -772,10 +772,7 @@ const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth,
         <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-slate-900 border border-white/10 shadow-xl z-[9999]">
           <div className="p-2 border-b border-white/10">
             <p className="text-xs text-gray-500 px-2 py-1">Upload</p>
-            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-cyan-400" /><span className="text-sm text-white">Hevy Workouts (JSON/CSV)</span><input type="file" accept=".json,.csv" onChange={(e) => { onUploadHevy(e); setIsOpen(false); }} className="hidden" /></label>
-            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-blue-400" /><span className="text-sm text-white">Hevy Measurements (CSV)</span><input type="file" accept=".csv" onChange={(e) => { onUploadHevyMeasurements(e); setIsOpen(false); }} className="hidden" /></label>
             <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-pink-400" /><span className="text-sm text-white">Apple Health (XML)</span><input type="file" accept=".xml,.zip" onChange={(e) => { onUploadAppleHealth(e); setIsOpen(false); }} className="hidden" /></label>
-            <label className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 cursor-pointer"><Upload size={16} className="text-rose-400" /><span className="text-sm text-white">Apple Health (CSV)</span><input type="file" accept=".csv" onChange={(e) => { onUploadAppleHealthCSV(e); setIsOpen(false); }} className="hidden" /></label>
           </div>
           <div className="p-2 border-b border-white/10">
             <p className="text-xs text-gray-500 px-2 py-1">Export</p>
@@ -784,7 +781,6 @@ const MoreMenu = ({ onUploadHevy, onUploadHevyMeasurements, onUploadAppleHealth,
           </div>
           <div className="p-2">
             <p className="text-xs text-gray-500 px-2 py-1">Actions</p>
-            <button onClick={() => { onTestJsonSync(); setIsOpen(false); }} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 w-full"><Zap size={16} className="text-green-400" /><span className="text-sm text-white">Test Shortcut Sync</span></button>
             <button onClick={() => { onReset(); setIsOpen(false); }} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-red-500/10 w-full"><Trash2 size={16} className="text-red-400" /><span className="text-sm text-red-400">Reset All Data</span></button>
           </div>
         </div>
@@ -920,6 +916,141 @@ const WeightTrendSection = ({ weightData, trendChange }) => {
       <div className="flex justify-between text-[10px] text-slate-500 mt-1">
         <span>{firstWeight.toFixed(1)} kg</span>
         <span>{lastWeight.toFixed(1)} kg</span>
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// HEALTH SCORE CARD
+// ============================================
+const HealthScoreCard = ({ measurements, appleHealth, conditioning, workouts }) => {
+  // Calculate component scores (0-100 each)
+
+  // 1. Sleep Score
+  const sleepAvg = appleHealth?.sleepAvg || 0;
+  const sleepScore = sleepAvg >= 7 ? 100 : sleepAvg >= 6 ? 75 : sleepAvg >= 5 ? 50 : 25;
+
+  // 2. Activity Score (based on recent workouts)
+  const recentWorkouts = [...(workouts || []), ...(conditioning || [])]
+    .filter(w => {
+      const date = new Date(w.start_time || w.date);
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      return date >= weekAgo;
+    }).length;
+  const activityScore = Math.min(100, recentWorkouts * 20); // 5 workouts = 100
+
+  // 3. Heart Health Score (resting HR)
+  const restingHR = appleHealth?.restingHeartRate || 70;
+  const hrScore = restingHR <= 55 ? 100 : restingHR <= 65 ? 85 : restingHR <= 75 ? 70 : 50;
+
+  // 4. Consistency Score (workouts per week average)
+  const totalWorkouts = (workouts?.length || 0) + (conditioning?.length || 0);
+  const weeksTracked = Math.max(1, Math.ceil(totalWorkouts / 4)); // Rough estimate
+  const avgPerWeek = totalWorkouts / weeksTracked;
+  const consistencyScore = Math.min(100, avgPerWeek * 25); // 4/week = 100
+
+  // Overall Health Score (weighted average)
+  const overallScore = Math.round(
+    (sleepScore * 0.25) +
+    (activityScore * 0.30) +
+    (hrScore * 0.20) +
+    (consistencyScore * 0.25)
+  );
+
+  const getScoreColor = (score) => {
+    if (score >= 80) return 'text-green-400';
+    if (score >= 60) return 'text-yellow-400';
+    if (score >= 40) return 'text-orange-400';
+    return 'text-red-400';
+  };
+
+  const getScoreLabel = (score) => {
+    if (score >= 80) return 'Excellent';
+    if (score >= 60) return 'Good';
+    if (score >= 40) return 'Fair';
+    return 'Needs Work';
+  };
+
+  return (
+    <div className="card h-full">
+      <div className="flex items-center gap-2 mb-4">
+        <Activity className="w-5 h-5 text-green-400" />
+        <h3 className="text-lg font-semibold text-white">Health Score</h3>
+      </div>
+      <div className="space-y-4">
+        {/* Overall Score */}
+        <div className="text-center mb-4">
+          <div className={`text-4xl font-bold ${getScoreColor(overallScore)}`}>
+            {overallScore}
+          </div>
+          <div className={`text-sm ${getScoreColor(overallScore)}`}>
+            {getScoreLabel(overallScore)}
+          </div>
+        </div>
+
+        {/* Component Scores */}
+        <div className="space-y-3">
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-slate-400 flex items-center gap-2">
+              <Moon className="w-3 h-3" /> Sleep
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${sleepScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  style={{ width: `${sleepScore}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-8">{sleepScore}</span>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-slate-400 flex items-center gap-2">
+              <Dumbbell className="w-3 h-3" /> Activity
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${activityScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  style={{ width: `${activityScore}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-8">{activityScore}</span>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-slate-400 flex items-center gap-2">
+              <Heart className="w-3 h-3" /> Heart
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${hrScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  style={{ width: `${hrScore}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-8">{hrScore}</span>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center">
+            <span className="text-sm text-slate-400 flex items-center gap-2">
+              <Target className="w-3 h-3" /> Consistency
+            </span>
+            <div className="flex items-center gap-2">
+              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${consistencyScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
+                  style={{ width: `${consistencyScore}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-8">{consistencyScore}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -3127,7 +3258,7 @@ const App = () => {
               <button onClick={handleRefresh} disabled={loading} className="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 disabled:opacity-50">
                 <RefreshCw size={18} className={`text-gray-400 ${loading ? 'animate-spin' : ''}`} />
               </button>
-              <MoreMenu onUploadHevy={handleUploadHevy} onUploadHevyMeasurements={handleUploadHevyMeasurements} onUploadAppleHealth={handleUploadAppleHealth} onUploadAppleHealthCSV={handleUploadAppleHealthCSV} onExportJson={handleExportJson} onExportCsv={handleExportCsv} onReset={handleReset} onTestJsonSync={handleTestJsonSync} />
+              <MoreMenu onUploadAppleHealth={handleUploadAppleHealth} onExportJson={handleExportJson} onExportCsv={handleExportCsv} onReset={handleReset} />
             </div>
           </div>
         </div>
@@ -3152,7 +3283,7 @@ const App = () => {
         {/* Main Stats Row - 3 Cards */}
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
           <KeyLiftsCard workouts={data.workouts} bodyweight={data.measurements.current.weight} />
-          <MeasurementsCard measurements={data.measurements} />
+          <HealthScoreCard measurements={data.measurements} appleHealth={data.appleHealth} conditioning={data.conditioning} workouts={data.workouts} />
           <WeeklyInsightsCard workouts={data.workouts} conditioning={data.conditioning} appleHealth={data.appleHealth} nutrition={data.nutrition} dateRange={dateRange} />
         </section>
 
