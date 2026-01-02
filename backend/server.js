@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const xml2js = require('xml2js');
 const crypto = require('crypto');
-const { parseAppleHealthExport } = require('./apple-health-parser');
+const { parseAppleHealthXMLStreaming } = require('./streaming-xml-parser');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -955,263 +955,270 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const fileSizeMB = (req.file.size / 1024 / 1024).toFixed(2);
-    console.log(`Processing Apple Health export using streaming parser... (${fileSizeMB}MB)`);
+    console.log(`Received file: ${req.file.originalname}, size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB`);
 
-    // Use streaming parser - handles 150MB+ files without memory issues
-    const parsedData = await parseAppleHealthExport(req.file.path, (linesProcessed) => {
-      if (linesProcessed % 50000 === 0) {
-        console.log(`Processed ${linesProcessed.toLocaleString()} lines...`);
-      }
-    });
+    const filePath = req.file.path;
 
-    console.log(`Parsing complete. Stats:`, parsedData.stats);
-
-    // Process parsed data into dashboard format
-    const processed = processAppleHealthData(parsedData);
-
-    // Read existing data
+    // Read EXISTING data first - CRITICAL for merge
     const data = readData();
 
-    // Keep ALL existing Hevy workouts (source: 'hevy' or has exercises array)
+    // Count existing Hevy workouts BEFORE processing
     const existingHevyWorkouts = (data.workouts || []).filter(w =>
       w.source === 'hevy' ||
       w.source === 'Hevy' ||
-      (w.exercises && w.exercises.length > 0) ||
-      w.id?.startsWith('hevy-')
+      (w.exercises && w.exercises.length > 0)
     );
+    console.log(`Preserving ${existingHevyWorkouts.length} existing Hevy workouts`);
 
-    console.log(`Preserving ${existingHevyWorkouts.length} Hevy workouts`);
+    // Stream parse the XML file
+    console.log('Starting streaming XML parse...');
+    const parsed = await parseAppleHealthXMLStreaming(filePath);
 
-    // MERGE: Add Apple Health data to Hevy workouts by date
-    const mergedWorkouts = existingHevyWorkouts.map(hevyWorkout => {
-      const workoutDate = hevyWorkout.start_time?.split('T')[0];
-      const appleData = processed.strengthWorkoutData[workoutDate];
-
-      if (appleData) {
-        console.log(`Merged Apple Health data with Hevy workout on ${workoutDate}`);
-        return {
-          ...hevyWorkout,
-          appleHealth: {
-            duration: appleData.duration,
-            activeCalories: appleData.activeCalories,
-            avgHeartRate: appleData.avgHeartRate,
-            maxHeartRate: appleData.maxHeartRate,
-            source: 'Apple Health'
-          }
-        };
-      }
-
-      return hevyWorkout;
-    });
-
-    // Final workouts = merged Hevy workouts
-    data.workouts = mergedWorkouts;
-
-    // Log merge results
-    const mergedCount = data.workouts.filter(w => w.appleHealth).length;
-    console.log(`Merged Apple Health data with ${mergedCount} workouts`);
-
-    // Merge conditioning - avoid duplicates by date+type
-    const existingConditioning = data.conditioning || [];
-    const newConditioning = processed.conditioningSessions || [];
-
-    newConditioning.forEach(nc => {
-      const dateKey = nc.date?.split('T')[0];
-      const exists = existingConditioning.some(ec =>
-        ec.date?.split('T')[0] === dateKey &&
-        ec.type === nc.type
-      );
-      if (!exists) {
-        existingConditioning.push(nc);
-      }
-    });
-
-    data.conditioning = existingConditioning.sort((a, b) =>
-      new Date(b.date) - new Date(a.date)
-    );
-
-    // Update resting heart rate if available
-    if (processed.avgRestingHR) {
-      data.appleHealth.restingHeartRate = processed.avgRestingHR;
+    // DELETE the XML file immediately after parsing
+    try {
+      fs.unlinkSync(filePath);
+      console.log('✅ Deleted uploaded XML file');
+    } catch (e) {
+      console.warn('Could not delete XML file:', e.message);
     }
 
-    // IMPORTANT: Apple Health has PRIORITY for weight and body fat
-    // Update weight - get oldest and newest from parsed data
-    if (parsedData.weightRecords.length > 0) {
-      const sorted = parsedData.weightRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
-      const startingWeight = sorted[0].value;
-      const currentWeight = sorted[sorted.length - 1].value;
-
-      // Preserve all existing body measurements (chest, waist, biceps, thighs, etc.)
-      if (startingWeight) {
-        data.measurements.starting = {
-          ...data.measurements.starting,
-          weight: Math.round(startingWeight * 10) / 10
-        };
-      }
-      if (currentWeight) {
-        data.measurements.current = {
-          ...data.measurements.current,
-          weight: Math.round(currentWeight * 10) / 10
-        };
-      }
-
-      // Mark Apple Health as source for weight
+    // Process Weight (last 90 days, latest value)
+    if (parsed.weight.length > 0) {
+      const sorted = parsed.weight.sort((a, b) => new Date(b.date) - new Date(a.date));
+      data.measurements = data.measurements || { current: {}, starting: {}, history: [] };
+      data.measurements.current.weight = sorted[0].value;
       data.measurements.sources = data.measurements.sources || {};
       data.measurements.sources.weight = 'Apple Health';
+
+      // Build weight history (last 90 days)
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      const recentWeights = sorted.filter(w => new Date(w.date) >= ninetyDaysAgo);
+
+      // Merge with existing history
+      recentWeights.forEach(w => {
+        const dateKey = new Date(w.date).toISOString().split('T')[0];
+        const exists = (data.measurements.history || []).some(h => h.date?.includes(dateKey));
+        if (!exists) {
+          data.measurements.history = data.measurements.history || [];
+          data.measurements.history.push({ date: w.date, weight: w.value });
+        }
+      });
+
+      data.measurements.history = (data.measurements.history || [])
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .slice(0, 90);
     }
 
-    // Update body fat - get oldest and newest from parsed data
-    if (parsedData.bodyFatRecords.length > 0) {
-      const sorted = parsedData.bodyFatRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
-      const startingBodyFat = sorted[0].value;
-      const currentBodyFat = sorted[sorted.length - 1].value;
-
-      // Preserve all existing measurements
-      if (startingBodyFat) {
-        data.measurements.starting = {
-          ...data.measurements.starting,
-          bodyFat: Math.round(startingBodyFat * 10) / 10
-        };
-      }
-      if (currentBodyFat) {
-        data.measurements.current = {
-          ...data.measurements.current,
-          bodyFat: Math.round(currentBodyFat * 10) / 10
-        };
-      }
-
-      // Mark Apple Health as source for body fat
+    // Process Body Fat
+    if (parsed.bodyFat.length > 0) {
+      const sorted = parsed.bodyFat.sort((a, b) => new Date(b.date) - new Date(a.date));
+      data.measurements = data.measurements || { current: {} };
+      data.measurements.current.bodyFat = sorted[0].value;
       data.measurements.sources = data.measurements.sources || {};
       data.measurements.sources.bodyFat = 'Apple Health';
     }
 
-    // Update waist circumference - get oldest and newest from parsed data
-    if (parsedData.waistRecords && parsedData.waistRecords.length > 0) {
-      const sorted = parsedData.waistRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
-      const startingWaist = sorted[0].value;
-      const currentWaist = sorted[sorted.length - 1].value;
+    // Process Lean Body Mass
+    if (parsed.leanBodyMass.length > 0) {
+      const sorted = parsed.leanBodyMass.sort((a, b) => new Date(b.date) - new Date(a.date));
+      data.measurements = data.measurements || { current: {} };
+      data.measurements.current.leanMass = sorted[0].value;
+    }
 
-      // Preserve all existing measurements
-      if (startingWaist) {
-        data.measurements.starting = {
-          ...data.measurements.starting,
-          waist: Math.round(startingWaist * 10) / 10
-        };
-      }
-      if (currentWaist) {
-        data.measurements.current = {
-          ...data.measurements.current,
-          waist: Math.round(currentWaist * 10) / 10
-        };
-      }
-
-      // Mark Apple Health as source for waist
+    // Process Waist Circumference
+    if (parsed.waistCircumference.length > 0) {
+      const sorted = parsed.waistCircumference.sort((a, b) => new Date(b.date) - new Date(a.date));
+      data.measurements = data.measurements || { current: {} };
+      data.measurements.current.waist = sorted[0].value;
       data.measurements.sources = data.measurements.sources || {};
       data.measurements.sources.waist = 'Apple Health';
     }
 
-    // Update lean body mass if available
-    if (parsedData.leanMassRecords && parsedData.leanMassRecords.length > 0) {
-      const sorted = parsedData.leanMassRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
-      const startingLeanMass = sorted[0].value;
-      const currentLeanMass = sorted[sorted.length - 1].value;
+    // Process Sleep
+    if (parsed.sleepAnalysis.length > 0) {
+      // Aggregate sleep by night
+      const sleepByNight = {};
+      parsed.sleepAnalysis.forEach(s => {
+        const dateKey = new Date(s.date).toISOString().split('T')[0];
+        sleepByNight[dateKey] = (sleepByNight[dateKey] || 0) + s.duration;
+      });
 
-      if (startingLeanMass) {
-        data.measurements.starting = {
-          ...data.measurements.starting,
-          leanMass: Math.round(startingLeanMass * 10) / 10
-        };
-      }
-      if (currentLeanMass) {
-        data.measurements.current = {
-          ...data.measurements.current,
-          leanMass: Math.round(currentLeanMass * 10) / 10
-        };
-      }
+      const sleepRecords = Object.entries(sleepByNight)
+        .map(([date, hours]) => ({ date, hours }))
+        .filter(s => s.hours > 0 && s.hours < 16) // Filter unreasonable values
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .slice(0, 30);
 
-      // Mark Apple Health as source for lean mass
-      data.measurements.sources = data.measurements.sources || {};
-      data.measurements.sources.leanMass = 'Apple Health';
-    }
+      data.appleHealth = data.appleHealth || {};
+      data.appleHealth.sleepRecords = sleepRecords;
 
-    // Store sleep records and calculate average
-    if (processed.sleepRecords && processed.sleepRecords.length > 0) {
-      data.appleHealth.sleepRecords = processed.sleepRecords;
-
-      // Calculate 7-day average sleep
-      const last7Days = processed.sleepRecords.slice(0, 7);
-      if (last7Days.length > 0) {
-        const avgSleep = last7Days.reduce((sum, r) => sum + r.hours, 0) / last7Days.length;
-        data.appleHealth.sleepAvg = Math.round(avgSleep * 10) / 10;
+      if (sleepRecords.length >= 7) {
+        data.appleHealth.sleepAvg = sleepRecords.slice(0, 7)
+          .reduce((sum, s) => sum + s.hours, 0) / 7;
       }
     }
 
-    // Store dietary calorie intake data
-    if (processed.dailyCalorieIntake && Object.keys(processed.dailyCalorieIntake).length > 0) {
-      data.nutrition = data.nutrition || {};
-      data.nutrition.dailyCalorieIntake = processed.dailyCalorieIntake;
+    // Process Resting Heart Rate
+    if (parsed.restingHeartRate.length > 0) {
+      const sorted = parsed.restingHeartRate.sort((a, b) => new Date(b.date) - new Date(a.date));
+      data.appleHealth = data.appleHealth || {};
+      data.appleHealth.restingHeartRate = Math.round(
+        sorted.slice(0, 7).reduce((sum, r) => sum + r.value, 0) / Math.min(sorted.length, 7)
+      );
     }
 
-    // Store weight history for trend graphs
-    if (processed.weightHistory && processed.weightHistory.length > 0) {
-      data.measurements.history = processed.weightHistory;
+    // Process Steps (aggregate by day)
+    if (parsed.steps.length > 0) {
+      const stepsByDay = {};
+      parsed.steps.forEach(s => {
+        const dateKey = new Date(s.date).toISOString().split('T')[0];
+        stepsByDay[dateKey] = (stepsByDay[dateKey] || 0) + s.value;
+      });
+
+      const dailySteps = Object.entries(stepsByDay)
+        .sort((a, b) => new Date(b[0]) - new Date(a[0]))
+        .slice(0, 7);
+
+      if (dailySteps.length > 0) {
+        data.appleHealth = data.appleHealth || {};
+        data.appleHealth.avgSteps = Math.round(
+          dailySteps.reduce((sum, [_, steps]) => sum + steps, 0) / dailySteps.length
+        );
+      }
     }
 
-    data.lastSync = new Date().toISOString();
+    // Process Active Energy (aggregate by day)
+    if (parsed.activeEnergy.length > 0) {
+      const caloriesByDay = {};
+      parsed.activeEnergy.forEach(c => {
+        const dateKey = new Date(c.date).toISOString().split('T')[0];
+        caloriesByDay[dateKey] = (caloriesByDay[dateKey] || 0) + c.value;
+      });
 
-    // Clean up uploaded file
-    fs.unlinkSync(req.file.path);
+      data.appleHealth = data.appleHealth || {};
+      data.appleHealth.dailyActiveCalories = {};
+      Object.entries(caloriesByDay).forEach(([date, cal]) => {
+        data.appleHealth.dailyActiveCalories[date] = Math.round(cal);
+      });
 
-    // Save data
-    if (writeData(data)) {
-      const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
-      console.log(`Apple Health import complete in ${processingTime}s`);
+      const dailyCals = Object.values(caloriesByDay).slice(0, 7);
+      if (dailyCals.length > 0) {
+        data.appleHealth.avgActiveCalories = Math.round(
+          dailyCals.reduce((sum, c) => sum + c, 0) / dailyCals.length
+        );
+      }
+    }
 
-      res.json({
-        success: true,
-        preserved: {
-          hevyWorkouts: existingHevyWorkouts.length,
-          mergedWithAppleHealth: mergedCount
-        },
-        added: {
-          conditioning: newConditioning.filter(nc => {
-            const dateKey = nc.date?.split('T')[0];
-            return !(data.conditioning || []).some(ec =>
-              ec.date?.split('T')[0] === dateKey && ec.type === nc.type
-            );
-          }).length
-        },
-        stats: {
-          processingTimeSeconds: parseFloat(processingTime),
-          fileSizeMB: parseFloat(fileSizeMB),
-          linesProcessed: parsedData.stats.linesProcessed,
-          workoutsFound: parsedData.stats.workoutsFound,
-          conditioningSessions: data.conditioning.length,
-          strengthWorkoutsEnriched: Object.keys(processed.strengthWorkoutData).length,
-          weightRecords: parsedData.stats.weightRecordsFound,
-          bodyFatRecords: parsedData.stats.bodyFatRecordsFound,
-          restingHRRecords: parsedData.stats.restingHRRecordsFound,
-          leanMassRecords: parsedData.stats.leanMassRecordsFound
+    // Process Dietary Energy (calories consumed)
+    if (parsed.dietaryEnergy.length > 0) {
+      const dietByDay = {};
+      parsed.dietaryEnergy.forEach(d => {
+        const dateKey = new Date(d.date).toISOString().split('T')[0];
+        dietByDay[dateKey] = (dietByDay[dateKey] || 0) + d.value;
+      });
+
+      data.nutrition = data.nutrition || { dailyCalorieIntake: {} };
+      Object.entries(dietByDay).forEach(([date, cal]) => {
+        data.nutrition.dailyCalorieIntake[date] = Math.round(cal);
+      });
+    }
+
+    // Process Workouts - MERGE with existing Hevy workouts
+    if (parsed.workouts.length > 0) {
+      // Separate strength workouts (to merge with Hevy) from cardio (for conditioning)
+      const strengthWorkouts = parsed.workouts.filter(w => w.category === 'strength');
+      const cardioWorkouts = parsed.workouts.filter(w => w.category !== 'strength');
+
+      // Merge Apple Health data into existing Hevy workouts by date
+      const mergedHevyWorkouts = existingHevyWorkouts.map(hevyWorkout => {
+        const hevyDate = hevyWorkout.start_time?.split('T')[0];
+
+        const matchingApple = strengthWorkouts.find(aw => {
+          const appleDate = aw.date?.split('T')[0];
+          return appleDate === hevyDate;
+        });
+
+        if (matchingApple) {
+          console.log(`Merged Apple Health data with Hevy workout on ${hevyDate}`);
+          return {
+            ...hevyWorkout,
+            appleHealth: {
+              duration: matchingApple.duration,
+              activeCalories: matchingApple.activeCalories,
+              avgHeartRate: matchingApple.avgHeartRate,
+              maxHeartRate: matchingApple.maxHeartRate,
+            }
+          };
+        }
+
+        return hevyWorkout;
+      });
+
+      // Replace workouts with merged data (preserves Hevy exercises!)
+      data.workouts = mergedHevyWorkouts;
+
+      // Add cardio workouts to conditioning
+      data.conditioning = data.conditioning || [];
+      cardioWorkouts.forEach(cw => {
+        const dateKey = cw.date?.split('T')[0];
+        const exists = data.conditioning.some(c =>
+          c.date?.split('T')[0] === dateKey && c.type === cw.type
+        );
+
+        if (!exists) {
+          data.conditioning.push({
+            id: `apple-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            ...cw,
+          });
         }
       });
-    } else {
-      res.status(500).json({ error: 'Failed to save data' });
+
+      // Sort conditioning by date
+      data.conditioning = data.conditioning
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
     }
+
+    // Update sync timestamp
+    data.lastSync = new Date().toISOString();
+    data.lastSyncSource = 'Apple Health XML';
+
+    // Save
+    writeData(data);
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    const response = {
+      success: true,
+      message: 'Apple Health data processed successfully',
+      duration: `${duration}s`,
+      processed: {
+        weight: parsed.weight.length,
+        bodyFat: parsed.bodyFat.length,
+        leanBodyMass: parsed.leanBodyMass.length,
+        workouts: parsed.workouts.length,
+        sleepRecords: parsed.sleepAnalysis.length,
+        restingHR: parsed.restingHeartRate.length,
+        steps: parsed.steps.length,
+        activeCalories: parsed.activeEnergy.length,
+        dietaryCalories: parsed.dietaryEnergy.length,
+      },
+      preserved: {
+        hevyWorkouts: existingHevyWorkouts.length,
+      },
+    };
+
+    console.log('Upload complete:', response);
+    res.json(response);
 
   } catch (error) {
     console.error('Apple Health upload error:', error);
 
-    // Clean up uploaded file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    // Clean up file on error
+    if (req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
 
-    res.status(500).json({
-      error: 'Failed to process Apple Health export',
-      details: error.message
-    });
+    res.status(500).json({ error: error.message });
   }
 });
 
