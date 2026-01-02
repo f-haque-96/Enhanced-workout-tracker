@@ -11,7 +11,8 @@ import {
   FileJson, FileText, X, ChevronLeft, CalendarDays,
   Layers, Play, Pause, Wind, Info, Star, Crown, Medal,
   Zap as Lightning, Target as TargetIcon, TrendingUp as TrendUp,
-  AlertTriangle, CheckCircle, Circle, Flame as Fire, Waves, Bike, Trash2
+  AlertTriangle, CheckCircle, Circle, Flame as Fire, Waves, Bike, Trash2,
+  User
 } from 'lucide-react';
 
 // ============================================
@@ -26,6 +27,45 @@ const COLORS = {
   pull: { primary: '#EF4444', secondary: '#FCA5A5', bg: 'rgba(239, 68, 68, 0.15)', text: '#F87171', gradient: 'from-red-500 to-rose-600', glow: 'shadow-red-500/25' },
   legs: { primary: '#3B82F6', secondary: '#93C5FD', bg: 'rgba(59, 130, 246, 0.15)', text: '#60A5FA', gradient: 'from-blue-500 to-indigo-600', glow: 'shadow-blue-500/25' },
   conditioning: { primary: '#10B981', secondary: '#6EE7B7', bg: 'rgba(16, 185, 129, 0.15)', text: '#34D399', gradient: 'from-emerald-500 to-teal-600', glow: 'shadow-emerald-500/25' },
+  calisthenics: { primary: '#06B6D4', secondary: '#67E8F9', bg: 'rgba(6, 182, 212, 0.15)', text: '#22D3EE', gradient: 'from-cyan-500 to-sky-600', glow: 'shadow-cyan-500/25' },
+};
+
+// ============================================
+// CALISTHENICS EXERCISES
+// ============================================
+const CALISTHENICS_EXERCISES = [
+  'Push Up', 'Push-Up', 'Pushup', 'Push Ups',
+  'Pull Up', 'Pull-Up', 'Pullup', 'Pull Ups',
+  'Chin Up', 'Chin-Up', 'Chinup',
+  'Dip', 'Dips', 'Tricep Dip',
+  'Bodyweight Squat', 'Air Squat', 'Squat (Bodyweight)',
+  'Lunge', 'Lunges', 'Walking Lunge',
+  'Plank', 'Side Plank',
+  'Burpee', 'Burpees',
+  'Mountain Climber', 'Mountain Climbers',
+  'Sit Up', 'Sit-Up', 'Situp',
+  'Crunch', 'Crunches',
+  'Leg Raise', 'Hanging Leg Raise',
+  'Pike Push Up', 'Handstand Push Up',
+  'Inverted Row', 'Australian Pull Up',
+  'Muscle Up', 'Muscle-Up',
+];
+
+const isCalisthenicsExercise = (exerciseName) => {
+  if (!exerciseName) return false;
+  const lowerName = exerciseName.toLowerCase();
+  return CALISTHENICS_EXERCISES.some(ex =>
+    lowerName.includes(ex.toLowerCase()) ||
+    lowerName.includes('bodyweight') ||
+    lowerName.includes('calisthenics')
+  );
+};
+
+const isCalisthenicsWorkout = (workout) => {
+  if (!workout || !workout.exercises) return false;
+  // A workout is calisthenics if majority of exercises are bodyweight
+  const caliCount = workout.exercises.filter(ex => isCalisthenicsExercise(ex.title)).length;
+  return caliCount >= workout.exercises.length * 0.5; // 50%+ calisthenics
 };
 
 // ============================================
@@ -1322,6 +1362,192 @@ const RestDaySleepCard = ({ restDays, sleepData, recovery, recColor, recStatus }
 };
 
 // ============================================
+// CALISTHENICS ACHIEVEMENTS
+// ============================================
+const CalisthenicsAchievements = ({ stats }) => {
+  const achievements = [
+    { name: '100 Push Ups (single session)', target: 100, current: stats.byExercise['Push Ups']?.maxReps || 0, icon: '💪' },
+    { name: '1000 Total Push Ups', target: 1000, current: stats.byExercise['Push Ups']?.totalReps || 0, icon: '🔥' },
+    { name: '20 Pull Ups (single session)', target: 20, current: stats.byExercise['Pull Ups']?.maxReps || 0, icon: '🎯' },
+    { name: '500 Total Pull Ups', target: 500, current: stats.byExercise['Pull Ups']?.totalReps || 0, icon: '⭐' },
+    { name: '50 Dips (single session)', target: 50, current: stats.byExercise['Dips']?.maxReps || 0, icon: '💎' },
+    { name: '100 Bodyweight Squats', target: 100, current: stats.byExercise['Squats']?.maxReps || 0, icon: '🦵' },
+  ];
+
+  return (
+    <div className="card">
+      <div className="flex items-center gap-2 mb-4">
+        <Trophy className="text-amber-400" size={20} />
+        <h3 className="text-lg font-semibold text-white">Calisthenics Achievements</h3>
+      </div>
+      <div className="space-y-3">
+        {achievements.map((ach, idx) => {
+          const progress = Math.min((ach.current / ach.target) * 100, 100);
+          const isComplete = progress >= 100;
+          return (
+            <div key={idx} className="space-y-1">
+              <div className="flex justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span>{ach.icon}</span>
+                  <span className={isComplete ? 'text-amber-400' : 'text-slate-300'}>{ach.name}</span>
+                  {isComplete && <span className="text-green-400">✓</span>}
+                </span>
+                <span className="text-slate-400 text-xs">{ach.current}/{ach.target}</span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${isComplete ? 'bg-amber-400' : 'bg-cyan-500'}`}
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ============================================
+// CALISTHENICS TAB
+// ============================================
+const CalisthenicsTab = ({ workouts, dateRange }) => {
+  const filteredWorkouts = useMemo(() => {
+    return (workouts || []).filter(w => isCalisthenicsWorkout(w));
+  }, [workouts]);
+
+  // Calculate stats
+  const stats = useMemo(() => {
+    const exercises = filteredWorkouts.flatMap(w => w.exercises || []);
+    const caliExercises = exercises.filter(ex => isCalisthenicsExercise(ex.title));
+
+    // Group by exercise type
+    const byExercise = {};
+    caliExercises.forEach(ex => {
+      const name = ex.title.toLowerCase().includes('push') ? 'Push Ups' :
+                   ex.title.toLowerCase().includes('pull') ? 'Pull Ups' :
+                   ex.title.toLowerCase().includes('dip') ? 'Dips' :
+                   ex.title.toLowerCase().includes('squat') ? 'Squats' :
+                   ex.title;
+
+      if (!byExercise[name]) {
+        byExercise[name] = { totalReps: 0, maxReps: 0, sessions: 0 };
+      }
+
+      const reps = ex.sets?.reduce((sum, s) => sum + (s.reps || 0), 0) || 0;
+      byExercise[name].totalReps += reps;
+      byExercise[name].maxReps = Math.max(byExercise[name].maxReps, ...ex.sets?.map(s => s.reps || 0) || [0]);
+      byExercise[name].sessions += 1;
+    });
+
+    return {
+      workouts: filteredWorkouts.length,
+      totalReps: caliExercises.reduce((sum, ex) =>
+        sum + (ex.sets?.reduce((s, set) => s + (set.reps || 0), 0) || 0), 0
+      ),
+      byExercise,
+    };
+  }, [filteredWorkouts]);
+
+  return (
+    <div className="space-y-4">
+      {/* Overview */}
+      <div className="card">
+        <div className="flex items-center gap-2 mb-4">
+          <User className="text-cyan-400" size={20} />
+          <h3 className="text-lg font-semibold text-white">Calisthenics Overview</h3>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-cyan-500/10 rounded-xl p-4 border border-cyan-500/20">
+            <div className="text-xs text-cyan-300">Workouts</div>
+            <div className="text-2xl font-bold">{stats.workouts}</div>
+          </div>
+          <div className="bg-cyan-500/10 rounded-xl p-4 border border-cyan-500/20">
+            <div className="text-xs text-cyan-300">Total Reps</div>
+            <div className="text-2xl font-bold">{stats.totalReps.toLocaleString()}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Exercise Breakdown */}
+      <div className="card">
+        <div className="flex items-center gap-2 mb-4">
+          <BarChart3 className="text-cyan-400" size={20} />
+          <h3 className="text-lg font-semibold text-white">Exercise Stats</h3>
+        </div>
+        <div className="space-y-3">
+          {Object.entries(stats.byExercise).map(([name, data]) => (
+            <div key={name} className="flex justify-between items-center py-2 border-b border-slate-700/50 last:border-0">
+              <div>
+                <div className="font-medium">{name}</div>
+                <div className="text-xs text-slate-500">{data.sessions} sessions</div>
+              </div>
+              <div className="text-right">
+                <div className="font-bold text-cyan-400">{data.totalReps} reps</div>
+                <div className="text-xs text-slate-500">Max: {data.maxReps}</div>
+              </div>
+            </div>
+          ))}
+          {Object.keys(stats.byExercise).length === 0 && (
+            <div className="text-center text-slate-500 py-4">
+              No calisthenics workouts yet.<br/>
+              <span className="text-xs">Log workouts with Push Ups, Pull Ups, Dips, etc.</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Achievements */}
+      <CalisthenicsAchievements stats={stats} />
+
+      {/* Workout Log */}
+      <div className="card">
+        <div className="flex items-center gap-2 mb-4">
+          <CalendarDays className="text-cyan-400" size={20} />
+          <h3 className="text-lg font-semibold text-white">Workout Log</h3>
+          <span className="text-slate-500 font-normal text-sm">({filteredWorkouts.length} entries)</span>
+        </div>
+        <div className="space-y-3 max-h-96 overflow-y-auto custom-scrollbar">
+          {filteredWorkouts.slice(0, 10).map((workout) => {
+            const dur = (new Date(workout.end_time) - new Date(workout.start_time)) / 1000;
+            const caliEx = workout.exercises.filter(e => isCalisthenicsExercise(e.title));
+            const totalReps = caliEx.reduce((sum, e) =>
+              sum + e.sets.reduce((s, set) => s + (set.reps || 0), 0), 0
+            );
+
+            return (
+              <div key={workout.id} className="p-4 rounded-xl border bg-cyan-500/5 border-cyan-500/20">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-white font-medium">{workout.title}</p>
+                    <p className="text-xs text-slate-400">{formatDate(workout.start_time)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-cyan-400 font-bold">{totalReps} reps</p>
+                    <p className="text-xs text-slate-500">{formatDuration(dur)}</p>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {caliEx.map((ex, idx) => (
+                    <div key={idx} className="text-xs text-slate-400 flex justify-between">
+                      <span>{ex.title}</span>
+                      <span>{ex.sets.length} sets</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {filteredWorkouts.length === 0 && (
+            <div className="text-center text-slate-500 py-4">No calisthenics workouts found</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================
 // SLEEP DATA CALCULATION
 // ============================================
 const calculateSleepData = (appleHealth) => {
@@ -2114,6 +2340,7 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
     { id: 'push', label: 'Push', icon: Dumbbell, color: COLORS.push },
     { id: 'pull', label: 'Pull', icon: ArrowUpRight, color: COLORS.pull },
     { id: 'legs', label: 'Legs', icon: Activity, color: COLORS.legs },
+    { id: 'calisthenics', label: 'Cali', icon: User, color: COLORS.calisthenics },
     { id: 'conditioning', label: 'Cardio', icon: Heart, color: COLORS.conditioning },
   ];
   
@@ -2419,10 +2646,12 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
       <div className="border-t border-white/10 pt-6">
         <h4 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
           <CalendarDays size={18} className="text-gray-400" />Workout Log
-          <span className="text-sm font-normal text-gray-500 ml-2">({activeTab === 'conditioning' ? filteredConditioning.length : filteredWorkouts.length} entries)</span>
+          <span className="text-sm font-normal text-gray-500 ml-2">({activeTab === 'conditioning' ? filteredConditioning.length : activeTab === 'calisthenics' ? workouts.filter(w => isCalisthenicsWorkout(w)).length : filteredWorkouts.length} entries)</span>
         </h4>
-        
-        {activeTab === 'conditioning' ? (
+
+        {activeTab === 'calisthenics' ? (
+          <CalisthenicsTab workouts={workouts} dateRange={dateRange} />
+        ) : activeTab === 'conditioning' ? (
           <div className="space-y-3 max-h-96 overflow-y-auto custom-scrollbar">
             {filteredConditioning.map(s => (
               <div key={s.id} className="p-4 rounded-xl border transition-all" style={{ backgroundColor: color.bg, borderColor: `${color.primary}30` }}>
