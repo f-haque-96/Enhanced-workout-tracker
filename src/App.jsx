@@ -3179,6 +3179,7 @@ const RoutineContent = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* Muscle Distribution - uses FILTERED stats */}
       {stats.muscleDistribution.length > 0 && (
