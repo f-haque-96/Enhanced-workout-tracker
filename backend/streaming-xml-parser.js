@@ -108,11 +108,21 @@ const parseAppleHealthXMLStreaming = async (filePath) => {
         }
       }
 
-      // Active Energy Burned
+      // Active Energy Burned (calories burned from exercise + daily activity)
       else if (line.includes('HKQuantityTypeIdentifierActiveEnergyBurned') && line.includes('Record')) {
         const record = parseRecordLine(line);
         if (record && record.value > 0) {
           results.activeEnergy.push(record);
+          results.stats.recordsFound++;
+        }
+      }
+
+      // Basal Energy Burned (BMR - resting calories)
+      else if (line.includes('HKQuantityTypeIdentifierBasalEnergyBurned') && line.includes('Record')) {
+        const record = parseRecordLine(line);
+        if (record && record.value > 0) {
+          results.basalEnergy = results.basalEnergy || [];
+          results.basalEnergy.push(record);
           results.stats.recordsFound++;
         }
       }

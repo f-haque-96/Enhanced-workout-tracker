@@ -238,16 +238,75 @@ const normalizeAppleHealth = (raw) => {
 };
 
 const normalizeApiData = (raw) => {
-  if (!raw) return null;
-  return {
-    workouts: normalizeWorkouts(raw.workouts),
-    conditioning: normalizeConditioning(raw.conditioning),
-    measurements: normalizeMeasurements(raw.measurements),
-    appleHealth: normalizeAppleHealth(raw.appleHealth),
+  if (!raw) {
+    console.error('normalizeApiData: received null/undefined');
+    return null;
+  }
+
+  // Debug: Log what we received
+  console.log('📥 Raw API data:', {
+    workouts: raw.workouts?.length || 0,
+    conditioning: raw.conditioning?.length || 0,
+    measurements: !!raw.measurements,
+    appleHealth: !!raw.appleHealth,
+  });
+
+  // CRITICAL: Preserve conditioning data - don't transform it away!
+  let normalizedConditioning = [];
+
+  if (raw.conditioning && Array.isArray(raw.conditioning)) {
+    normalizedConditioning = raw.conditioning.map(session => {
+      if (!session) return null;
+      return {
+        ...session,
+        date: session.date || session.startDate || session.Start_Date,
+        activeCalories: session.activeCalories ?? session.calories ?? session.Calories ?? 0,
+        avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? session.hr_avg ?? 0,
+        maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? session.hr_max ?? 0,
+        duration: session.duration ?? session.Duration ?? 0,
+        distance: session.distance ?? session.Distance ?? 0,
+        steps: session.steps ?? session.Steps ?? 0,
+        type: session.type ?? session.Type ?? 'Workout',
+        category: session.category ?? 'other',
+      };
+    }).filter(Boolean);
+
+    console.log('✅ Normalized conditioning:', normalizedConditioning.length);
+  } else {
+    console.warn('⚠️ No conditioning array in raw data');
+  }
+
+  // Normalize workouts
+  let normalizedWorkouts = [];
+  if (raw.workouts && Array.isArray(raw.workouts)) {
+    normalizedWorkouts = raw.workouts.map(w => ({
+      ...w,
+      // Preserve all existing data
+    })).filter(Boolean);
+  }
+
+  const result = {
+    workouts: normalizedWorkouts,
+    conditioning: normalizedConditioning,
+    measurements: raw.measurements || { current: {}, starting: {}, history: [] },
+    appleHealth: raw.appleHealth || {},
     nutrition: raw.nutrition || { dailyCalorieIntake: {} },
     lastSync: raw.lastSync,
     lastWebhook: raw.lastWebhook,
   };
+
+  // VERIFY conditioning wasn't lost
+  if (raw.conditioning?.length > 0 && result.conditioning.length === 0) {
+    console.error('❌ CONDITIONING WAS LOST! Using raw data as fallback');
+    result.conditioning = raw.conditioning;
+  }
+
+  console.log('📤 Normalized result:', {
+    workouts: result.workouts.length,
+    conditioning: result.conditioning.length,
+  });
+
+  return result;
 };
 
 // ============================================
@@ -924,38 +983,36 @@ const WeightTrendSection = ({ weightData, trendChange }) => {
 // ============================================
 // HEALTH SCORE CARD
 // ============================================
-const HealthScoreCard = ({ measurements, appleHealth, conditioning, workouts }) => {
-  // Calculate component scores (0-100 each)
+const HealthScoreBodyStatsCard = ({ measurements, appleHealth, conditioning, workouts }) => {
+  const current = measurements?.current || {};
+  const history = measurements?.history || [];
 
-  // 1. Sleep Score
+  const weight = current.weight || 0;
+  const bodyFat = current.bodyFat || 0;
+  const leanMass = current.leanMass || 0;
+  const heightM = 1.75; // TODO: Make configurable
+  const bmi = weight > 0 ? (weight / (heightM * heightM)) : 0;
+
+  // Calculate Health Score components (0-100 each)
   const sleepAvg = appleHealth?.sleepAvg || 0;
   const sleepScore = sleepAvg >= 7 ? 100 : sleepAvg >= 6 ? 75 : sleepAvg >= 5 ? 50 : 25;
 
-  // 2. Activity Score (based on recent workouts)
   const recentWorkouts = [...(workouts || []), ...(conditioning || [])]
     .filter(w => {
       const date = new Date(w.start_time || w.date);
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       return date >= weekAgo;
     }).length;
-  const activityScore = Math.min(100, recentWorkouts * 20); // 5 workouts = 100
+  const activityScore = Math.min(100, recentWorkouts * 20);
 
-  // 3. Heart Health Score (resting HR)
   const restingHR = appleHealth?.restingHeartRate || 70;
   const hrScore = restingHR <= 55 ? 100 : restingHR <= 65 ? 85 : restingHR <= 75 ? 70 : 50;
 
-  // 4. Consistency Score (workouts per week average)
-  const totalWorkouts = (workouts?.length || 0) + (conditioning?.length || 0);
-  const weeksTracked = Math.max(1, Math.ceil(totalWorkouts / 4)); // Rough estimate
-  const avgPerWeek = totalWorkouts / weeksTracked;
-  const consistencyScore = Math.min(100, avgPerWeek * 25); // 4/week = 100
-
-  // Overall Health Score (weighted average)
+  // Overall Health Score (no decimals)
   const overallScore = Math.round(
-    (sleepScore * 0.25) +
-    (activityScore * 0.30) +
-    (hrScore * 0.20) +
-    (consistencyScore * 0.25)
+    (sleepScore * 0.35) +
+    (activityScore * 0.35) +
+    (hrScore * 0.30)
   );
 
   const getScoreColor = (score) => {
@@ -965,94 +1022,144 @@ const HealthScoreCard = ({ measurements, appleHealth, conditioning, workouts }) 
     return 'text-red-400';
   };
 
-  const getScoreLabel = (score) => {
-    if (score >= 80) return 'Excellent';
-    if (score >= 60) return 'Good';
-    if (score >= 40) return 'Fair';
-    return 'Needs Work';
+  const getBmiCategory = (bmi) => {
+    if (!bmi) return { label: 'No data', color: 'text-slate-400' };
+    if (bmi < 18.5) return { label: 'Underweight', color: 'text-blue-400' };
+    if (bmi < 25) return { label: 'Normal', color: 'text-green-400' };
+    if (bmi < 30) return { label: 'Overweight', color: 'text-yellow-400' };
+    return { label: 'Obese', color: 'text-red-400' };
   };
 
+  const bmiInfo = getBmiCategory(bmi);
+
+  // Weight trend calculation
+  const weightData = (history || [])
+    .filter(h => h.weight && h.weight >= 40 && h.weight <= 200)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .slice(-30);
+
+  const hasWeightTrend = weightData.length >= 2;
+  const firstWeight = hasWeightTrend ? weightData[0].weight : 0;
+  const lastWeight = hasWeightTrend ? weightData[weightData.length - 1].weight : weight;
+  const weightChange = hasWeightTrend ? lastWeight - firstWeight : 0;
+
+  // Sparkline
+  const weights = weightData.map(d => d.weight);
+  const minWeight = weights.length > 0 ? Math.min(...weights) : 0;
+  const maxWeight = weights.length > 0 ? Math.max(...weights) : 0;
+  const range = maxWeight - minWeight || 1;
+
+  const sparklineWidth = 200;
+  const sparklineHeight = 40;
+  const padding = 4;
+
+  const points = weights.map((w, i) => {
+    const x = padding + (i / (weights.length - 1 || 1)) * (sparklineWidth - padding * 2);
+    const y = sparklineHeight - padding - ((w - minWeight) / range) * (sparklineHeight - padding * 2);
+    return `${x},${y}`;
+  });
+
+  const pathD = points.length > 1 ? `M ${points.join(' L ')}` : '';
+  const trendColor = weightChange <= 0 ? '#22c55e' : '#ef4444'; // Green if losing (cutting)
+
   return (
-    <div className="card h-full">
-      <div className="flex items-center gap-2 mb-4">
-        <Activity className="w-5 h-5 text-green-400" />
-        <h3 className="text-lg font-semibold text-white">Health Score</h3>
-      </div>
-      <div className="space-y-4">
-        {/* Overall Score */}
-        <div className="text-center mb-4">
-          <div className={`text-4xl font-bold ${getScoreColor(overallScore)}`}>
-            {overallScore}
-          </div>
-          <div className={`text-sm ${getScoreColor(overallScore)}`}>
-            {getScoreLabel(overallScore)}
-          </div>
-        </div>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Activity className="w-4 h-4 text-green-400" />
+          Health Score & Body Stats
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
 
-        {/* Component Scores */}
-        <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-slate-400 flex items-center gap-2">
-              <Moon className="w-3 h-3" /> Sleep
-            </span>
-            <div className="flex items-center gap-2">
-              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${sleepScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
-                  style={{ width: `${sleepScore}%` }}
-                />
-              </div>
-              <span className="text-xs text-slate-500 w-8">{sleepScore}</span>
+        {/* Health Score - No Decimals */}
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs text-slate-400 mb-1">Health Score</div>
+            <div className={`text-3xl font-bold ${getScoreColor(overallScore)}`}>
+              {overallScore}
             </div>
           </div>
-
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-slate-400 flex items-center gap-2">
-              <Dumbbell className="w-3 h-3" /> Activity
-            </span>
-            <div className="flex items-center gap-2">
-              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${activityScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
-                  style={{ width: `${activityScore}%` }}
-                />
-              </div>
-              <span className="text-xs text-slate-500 w-8">{activityScore}</span>
+          <div className="flex gap-2">
+            <div className="text-center px-3 py-1 bg-slate-800/50 rounded-lg">
+              <div className="text-[10px] text-slate-500">Sleep</div>
+              <div className="text-sm font-medium">{sleepScore}</div>
             </div>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-slate-400 flex items-center gap-2">
-              <Heart className="w-3 h-3" /> Heart
-            </span>
-            <div className="flex items-center gap-2">
-              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${hrScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
-                  style={{ width: `${hrScore}%` }}
-                />
-              </div>
-              <span className="text-xs text-slate-500 w-8">{hrScore}</span>
+            <div className="text-center px-3 py-1 bg-slate-800/50 rounded-lg">
+              <div className="text-[10px] text-slate-500">Activity</div>
+              <div className="text-sm font-medium">{activityScore}</div>
             </div>
-          </div>
-
-          <div className="flex justify-between items-center">
-            <span className="text-sm text-slate-400 flex items-center gap-2">
-              <Target className="w-3 h-3" /> Consistency
-            </span>
-            <div className="flex items-center gap-2">
-              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${consistencyScore >= 70 ? 'bg-green-500' : 'bg-yellow-500'}`}
-                  style={{ width: `${consistencyScore}%` }}
-                />
-              </div>
-              <span className="text-xs text-slate-500 w-8">{consistencyScore}</span>
+            <div className="text-center px-3 py-1 bg-slate-800/50 rounded-lg">
+              <div className="text-[10px] text-slate-500">Heart</div>
+              <div className="text-sm font-medium">{hrScore}</div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+
+        <div className="border-t border-slate-700/50 pt-4"></div>
+
+        {/* Weight + Lean Mass Row */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/10 rounded-xl p-3 border border-blue-500/20">
+            <div className="text-xs text-blue-300">Weight</div>
+            <div className="text-2xl font-bold">{weight}<span className="text-sm text-slate-400 ml-1">kg</span></div>
+          </div>
+          <div className="bg-gradient-to-br from-cyan-500/20 to-cyan-600/10 rounded-xl p-3 border border-cyan-500/20">
+            <div className="text-xs text-cyan-300">Lean Mass</div>
+            <div className="text-2xl font-bold">
+              {leanMass > 0 ? leanMass.toFixed(1) : '--'}
+              <span className="text-sm text-slate-400 ml-1">kg</span>
+            </div>
+          </div>
+        </div>
+
+        {/* BMI + Body Fat Row */}
+        <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/10 rounded-xl p-3 border border-purple-500/20">
+          <div className="flex justify-between">
+            <div>
+              <div className="text-xs text-purple-300">BMI</div>
+              <div className="text-xl font-bold">{bmi > 0 ? bmi.toFixed(1) : '--'}</div>
+              <div className={`text-xs ${bmiInfo.color}`}>{bmiInfo.label}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-purple-300">Body Fat</div>
+              <div className="text-xl font-bold">{bodyFat > 0 ? bodyFat.toFixed(1) : '--'}<span className="text-sm">%</span></div>
+            </div>
+          </div>
+        </div>
+
+        {/* Weight Trend Graph */}
+        {hasWeightTrend && (
+          <div className={`rounded-xl p-3 border ${weightChange <= 0 ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+            <div className="flex justify-between items-center mb-2">
+              <div className="text-xs text-slate-400">Weight Trend (30d)</div>
+              <div className={`text-sm font-medium ${weightChange <= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {weightChange > 0 ? '+' : ''}{weightChange.toFixed(1)} kg
+              </div>
+            </div>
+            <svg width={sparklineWidth} height={sparklineHeight} className="w-full">
+              <line x1={padding} y1={sparklineHeight/2} x2={sparklineWidth-padding} y2={sparklineHeight/2} stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
+              {pathD && (
+                <>
+                  <path d={pathD} fill="none" stroke={trendColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <circle
+                    cx={parseFloat(points[points.length-1]?.split(',')[0]) || 0}
+                    cy={parseFloat(points[points.length-1]?.split(',')[1]) || 0}
+                    r="3"
+                    fill={trendColor}
+                  />
+                </>
+              )}
+            </svg>
+            <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+              <span>{firstWeight.toFixed(1)} kg</span>
+              <span>{lastWeight.toFixed(1)} kg</span>
+            </div>
+          </div>
+        )}
+
+      </CardContent>
+    </Card>
   );
 };
 
@@ -1383,128 +1490,68 @@ const BatteryIndicator = ({ percentage, color }) => {
 };
 
 // ============================================
-// REST DAY & SLEEP CARD
+// REST DAY & SLEEP CARD - SIMPLIFIED
 // ============================================
 const RestDaySleepCard = ({ restDays, sleepData, recovery, recColor, recStatus }) => {
   const avgSleep = sleepData?.avgHours || 0;
-  const lastNightSleep = sleepData?.lastNight || 0;
-  const sleepDebt = sleepData?.debt || 0;
-  const sleepConsistency = sleepData?.consistency || 0;
 
   // Determine card style based on recovery status
   const getCardStyle = () => {
-    switch (recStatus) {
-      case 'ready':
-        return {
-          bg: 'from-green-500/20 to-green-600/10',
-          border: 'border-green-500/30',
-          accent: 'text-green-400',
-          icon: '💪',
-          message: 'Well rested - Ready for intense workout!',
-        };
-      case 'moderate':
-        return {
-          bg: 'from-amber-500/20 to-amber-600/10',
-          border: 'border-amber-500/30',
-          accent: 'text-amber-400',
-          icon: '⚡',
-          message: 'Moderate recovery - Light workout or cardio recommended',
-        };
-      case 'fatigued':
-        return {
-          bg: 'from-red-500/20 to-red-600/10',
-          border: 'border-red-500/30',
-          accent: 'text-red-400',
-          icon: '😴',
-          message: 'Fatigued - Consider rest or very light activity',
-        };
-      default:
-        return {
-          bg: 'from-slate-500/20 to-slate-600/10',
-          border: 'border-slate-500/30',
-          accent: 'text-slate-400',
-          icon: '📊',
-          message: 'Insufficient data',
-        };
+    if (recovery >= 75) {
+      return {
+        bg: 'from-green-500/20 to-green-600/10',
+        border: 'border-green-500/30',
+        accent: 'text-green-400',
+        icon: '💪',
+        message: 'Ready for intense workout!',
+      };
+    } else if (recovery >= 50) {
+      return {
+        bg: 'from-amber-500/20 to-amber-600/10',
+        border: 'border-amber-500/30',
+        accent: 'text-amber-400',
+        icon: '⚡',
+        message: 'Light workout or cardio recommended',
+      };
+    } else {
+      return {
+        bg: 'from-red-500/20 to-red-600/10',
+        border: 'border-red-500/30',
+        accent: 'text-red-400',
+        icon: '😴',
+        message: 'Rest day recommended',
+      };
     }
   };
 
   const style = getCardStyle();
 
-  // Sleep quality rating
-  const getSleepQuality = (hours) => {
-    if (hours >= 7 && hours <= 9) return { label: 'Optimal', color: 'text-green-400' };
-    if (hours >= 6) return { label: 'Adequate', color: 'text-amber-400' };
-    return { label: 'Poor', color: 'text-red-400' };
-  };
-
-  const sleepQuality = getSleepQuality(avgSleep);
-
   return (
-    <div className={`bg-gradient-to-br ${style.bg} rounded-xl p-4 border ${style.border} col-span-2`}>
+    <div className={`bg-gradient-to-br ${style.bg} rounded-xl p-4 border ${style.border}`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Moon className="w-5 h-5 text-indigo-400" />
-          <span className="font-medium text-slate-200">Recovery & Sleep</span>
+          <Moon className="w-4 h-4 text-indigo-400" />
+          <span className="text-sm font-medium text-slate-200">Recovery & Sleep</span>
         </div>
-        <div className="text-2xl">{style.icon}</div>
+        <div className="text-xl">{style.icon}</div>
       </div>
 
-      {/* Main Stats Row */}
-      <div className="grid grid-cols-3 gap-4 mb-4">
-        {/* Recovery Score */}
+      {/* Main Stats - SIMPLIFIED */}
+      <div className="grid grid-cols-3 gap-4 mb-3">
         <div className="text-center">
-          <div className={`text-3xl font-bold ${style.accent}`}>{recovery}%</div>
-          <div className="text-xs text-slate-400">Recovery Score</div>
+          <div className={`text-2xl font-bold ${style.accent}`}>{recovery}%</div>
+          <div className="text-xs text-slate-400">Recovery</div>
         </div>
-
-        {/* Rest Days */}
         <div className="text-center">
-          <div className="text-3xl font-bold text-slate-200">{restDays}</div>
+          <div className="text-2xl font-bold text-slate-200">{restDays}</div>
           <div className="text-xs text-slate-400">Rest Days</div>
         </div>
-
-        {/* Avg Sleep */}
         <div className="text-center">
-          <div className="text-3xl font-bold text-indigo-400">
-            {avgSleep > 0 ? avgSleep.toFixed(1) : '--'}<span className="text-lg">h</span>
-          </div>
+          <div className="text-2xl font-bold text-indigo-400">{avgSleep.toFixed(1)}<span className="text-sm">h</span></div>
           <div className="text-xs text-slate-400">Avg Sleep</div>
         </div>
       </div>
-
-      {/* Sleep Details */}
-      {avgSleep > 0 && (
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="bg-slate-900/30 rounded-lg p-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Last Night</span>
-              <span className="font-medium">{lastNightSleep.toFixed(1)}h</span>
-            </div>
-          </div>
-          <div className="bg-slate-900/30 rounded-lg p-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Sleep Quality</span>
-              <span className={`font-medium ${sleepQuality.color}`}>{sleepQuality.label}</span>
-            </div>
-          </div>
-          {sleepDebt > 0.5 && (
-            <div className="bg-slate-900/30 rounded-lg p-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-400">Sleep Debt</span>
-                <span className="font-medium text-red-400">-{sleepDebt.toFixed(1)}h</span>
-              </div>
-            </div>
-          )}
-          <div className="bg-slate-900/30 rounded-lg p-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Consistency</span>
-              <span className="font-medium">{Math.round(sleepConsistency * 100)}%</span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Status Message */}
       <div className={`text-center text-sm ${style.accent} font-medium py-2 bg-slate-900/30 rounded-lg`}>
@@ -3283,7 +3330,7 @@ const App = () => {
         {/* Main Stats Row - 3 Cards */}
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
           <KeyLiftsCard workouts={data.workouts} bodyweight={data.measurements.current.weight} />
-          <HealthScoreCard measurements={data.measurements} appleHealth={data.appleHealth} conditioning={data.conditioning} workouts={data.workouts} />
+          <HealthScoreBodyStatsCard measurements={data.measurements} appleHealth={data.appleHealth} conditioning={data.conditioning} workouts={data.workouts} />
           <WeeklyInsightsCard workouts={data.workouts} conditioning={data.conditioning} appleHealth={data.appleHealth} nutrition={data.nutrition} dateRange={dateRange} />
         </section>
 

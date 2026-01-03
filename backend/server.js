@@ -962,13 +962,22 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
     // Read EXISTING data first - CRITICAL for merge
     const data = readData();
 
-    // Count existing Hevy workouts BEFORE processing
-    const existingHevyWorkouts = (data.workouts || []).filter(w =>
-      w.source === 'hevy' ||
-      w.source === 'Hevy' ||
-      (w.exercises && w.exercises.length > 0)
-    );
-    console.log(`Preserving ${existingHevyWorkouts.length} existing Hevy workouts`);
+    // PRESERVE all existing Hevy workouts - these contain the exercises for achievements!
+    const existingHevyWorkouts = (data.workouts || []).filter(w => {
+      // Keep if it has exercises (definitely from Hevy)
+      if (w.exercises && w.exercises.length > 0) return true;
+      // Keep if source is Hevy
+      if (w.source === 'hevy' || w.source === 'Hevy') return true;
+      // Keep if it has Hevy-specific fields
+      if (w.id && !w.id.startsWith('apple-')) return true;
+      return false;
+    });
+
+    console.log(`🏋️ Preserving ${existingHevyWorkouts.length} Hevy workouts with exercises`);
+
+    // Also preserve existing conditioning
+    const existingConditioning = data.conditioning || [];
+    console.log(`🏃 Preserving ${existingConditioning.length} existing conditioning sessions`);
 
     // Stream parse the XML file
     console.log('Starting streaming XML parse...');
@@ -1124,24 +1133,35 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
     }
 
     // Process Workouts - MERGE with existing Hevy workouts
-    if (parsed.workouts.length > 0) {
-      // Separate strength workouts (to merge with Hevy) from cardio (for conditioning)
-      const strengthWorkouts = parsed.workouts.filter(w => w.category === 'strength');
-      const cardioWorkouts = parsed.workouts.filter(w => w.category !== 'strength');
+    if (parsed.workouts && parsed.workouts.length > 0) {
+      // Separate Apple Health strength workouts from cardio
+      const appleStrength = parsed.workouts.filter(w =>
+        w.category === 'strength' ||
+        w.type?.toLowerCase().includes('strength') ||
+        w.type?.toLowerCase().includes('training')
+      );
+      const appleCardio = parsed.workouts.filter(w =>
+        w.category !== 'strength' &&
+        !w.type?.toLowerCase().includes('strength') &&
+        !w.type?.toLowerCase().includes('training')
+      );
 
-      // Merge Apple Health data into existing Hevy workouts by date
-      const mergedHevyWorkouts = existingHevyWorkouts.map(hevyWorkout => {
-        const hevyDate = hevyWorkout.start_time?.split('T')[0];
+      console.log(`📊 Apple Health: ${appleStrength.length} strength, ${appleCardio.length} cardio`);
 
-        const matchingApple = strengthWorkouts.find(aw => {
+      // Merge Apple Health HR/calories INTO existing Hevy workouts (by date)
+      const mergedWorkouts = existingHevyWorkouts.map(hevyWorkout => {
+        const hevyDate = (hevyWorkout.start_time || hevyWorkout.date)?.split('T')[0];
+
+        // Find Apple Health strength workout on same day
+        const matchingApple = appleStrength.find(aw => {
           const appleDate = aw.date?.split('T')[0];
           return appleDate === hevyDate;
         });
 
         if (matchingApple) {
-          console.log(`Merged Apple Health data with Hevy workout on ${hevyDate}`);
+          console.log(`✅ Merged Apple Health data with Hevy workout on ${hevyDate}`);
           return {
-            ...hevyWorkout,
+            ...hevyWorkout, // KEEP all Hevy data including exercises!
             appleHealth: {
               duration: matchingApple.duration,
               activeCalories: matchingApple.activeCalories,
@@ -1151,32 +1171,39 @@ app.post('/api/apple-health/upload', upload.single('file'), async (req, res) => 
           };
         }
 
-        return hevyWorkout;
+        return hevyWorkout; // Return unchanged if no match
       });
 
-      // Replace workouts with merged data (preserves Hevy exercises!)
-      data.workouts = mergedHevyWorkouts;
+      // Set workouts to merged data - PRESERVES Hevy exercises!
+      data.workouts = mergedWorkouts;
 
-      // Add cardio workouts to conditioning
-      data.conditioning = data.conditioning || [];
-      cardioWorkouts.forEach(cw => {
-        const dateKey = cw.date?.split('T')[0];
-        const exists = data.conditioning.some(c =>
-          c.date?.split('T')[0] === dateKey && c.type === cw.type
+      // Add Apple Health cardio to conditioning (avoid duplicates)
+      appleCardio.forEach(cardio => {
+        const cardioDate = cardio.date?.split('T')[0];
+        const isDuplicate = existingConditioning.some(ec =>
+          ec.date?.split('T')[0] === cardioDate &&
+          ec.type === cardio.type
         );
 
-        if (!exists) {
-          data.conditioning.push({
+        if (!isDuplicate) {
+          existingConditioning.push({
             id: `apple-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            ...cw,
+            ...cardio,
+            source: 'Apple Health',
           });
         }
       });
 
-      // Sort conditioning by date
-      data.conditioning = data.conditioning
-        .sort((a, b) => new Date(b.date) - new Date(a.date));
+      data.conditioning = existingConditioning.sort((a, b) =>
+        new Date(b.date) - new Date(a.date)
+      );
+    } else {
+      // No workouts in XML - KEEP existing data unchanged!
+      data.workouts = existingHevyWorkouts;
+      data.conditioning = existingConditioning;
     }
+
+    console.log(`📦 Final: ${data.workouts.length} workouts, ${data.conditioning.length} conditioning`);
 
     // Update sync timestamp
     data.lastSync = new Date().toISOString();
