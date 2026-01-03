@@ -164,6 +164,19 @@ app.get('/api/data', (req, res) => {
   res.json(data);
 });
 
+// Save/Update routines configuration
+app.put('/api/routines', (req, res) => {
+  try {
+    const data = readData();
+    data.routines = req.body.routines;
+    writeData(data);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to save routines:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Reset all data
 app.post('/api/reset', (req, res) => {
   const freshData = {

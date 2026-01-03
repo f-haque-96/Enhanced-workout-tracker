@@ -2527,6 +2527,360 @@ const StrengthPRsCard = ({ category, workouts, bodyweight = 84 }) => {
 };
 
 // ============================================
+// DYNAMIC ROUTINE SYSTEM
+// ============================================
+
+// Icon and Color Maps for Routines
+const ICON_MAP = {
+  'dumbbell': Dumbbell,
+  'user': User,
+  'heart': Heart,
+  'activity': Activity,
+};
+
+const COLOR_MAP = {
+  'orange': { bg: 'bg-orange-500/20', text: 'text-orange-400', border: 'border-orange-500/30' },
+  'blue': { bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/30' },
+  'cyan': { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/30' },
+  'green': { bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500/30' },
+  'purple': { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30' },
+  'red': { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/30' },
+};
+
+// Routine Tabs Component
+const RoutineTabs = ({
+  routines,
+  workouts,
+  conditioning,
+  activeRoutine,
+  setActiveRoutine,
+  activeSubCategory,
+  setActiveSubCategory,
+  onAddRoutine,
+}) => {
+  const [openDropdown, setOpenDropdown] = useState(null);
+
+  // Sort routines by order
+  const sortedRoutines = useMemo(() => {
+    return Object.entries(routines || {})
+      .filter(([_, r]) => r.enabled)
+      .sort((a, b) => a[1].order - b[1].order);
+  }, [routines]);
+
+  // Count workouts per routine/subcategory
+  const getWorkoutCount = (routineKey, subCategory = null) => {
+    const routine = routines[routineKey];
+    if (!routine) return 0;
+
+    const isCardio = routineKey === 'cardio';
+    const data = isCardio ? conditioning : workouts;
+
+    if (!data) return 0;
+
+    return data.filter(w => {
+      const title = (w.title || w.name || w.type || '').toLowerCase();
+
+      if (subCategory && subCategory !== 'All') {
+        const keywords = routine.keywords[subCategory] || [];
+        return keywords.some(kw => title.includes(kw.toLowerCase()));
+      }
+
+      // Match any keyword in this routine
+      const allKeywords = Object.values(routine.keywords).flat();
+      return allKeywords.some(kw => title.includes(kw.toLowerCase()));
+    }).length;
+  };
+
+  const handleTabClick = (routineKey) => {
+    if (activeRoutine === routineKey) {
+      // Toggle dropdown
+      setOpenDropdown(openDropdown === routineKey ? null : routineKey);
+    } else {
+      // Switch to new routine
+      setActiveRoutine(routineKey);
+      setActiveSubCategory('All');
+      setOpenDropdown(null);
+    }
+  };
+
+  const handleSubCategorySelect = (routineKey, subCat) => {
+    setActiveRoutine(routineKey);
+    setActiveSubCategory(subCat);
+    setOpenDropdown(null);
+  };
+
+  return (
+    <div className="relative">
+      {/* Tab Bar */}
+      <div className="flex items-center gap-1 overflow-x-auto pb-2 scrollbar-hide">
+        {sortedRoutines.map(([key, routine]) => {
+          const Icon = ICON_MAP[routine.icon] || Dumbbell;
+          const colors = COLOR_MAP[routine.color] || COLOR_MAP.orange;
+          const isActive = activeRoutine === key;
+          const hasDropdown = routine.subCategories && routine.subCategories.length > 0;
+          const count = getWorkoutCount(key);
+
+          return (
+            <div key={key} className="relative">
+              <button
+                onClick={() => handleTabClick(key)}
+                className={`
+                  flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
+                  transition-all duration-200 whitespace-nowrap
+                  ${isActive
+                    ? `${colors.bg} ${colors.text} ${colors.border} border`
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }
+                `}
+              >
+                <Icon className="w-4 h-4" />
+                <span>{routine.name}</span>
+                {hasDropdown && (
+                  <ChevronDown className={`w-3 h-3 transition-transform ${openDropdown === key ? 'rotate-180' : ''}`} />
+                )}
+                {count > 0 && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${isActive ? 'bg-slate-900/50' : 'bg-slate-700/50'}`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown */}
+              {hasDropdown && openDropdown === key && (
+                <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 min-w-[140px]">
+                  <button
+                    onClick={() => handleSubCategorySelect(key, 'All')}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 flex justify-between items-center
+                      ${activeSubCategory === 'All' ? colors.text : 'text-slate-300'}
+                    `}
+                  >
+                    <span>All</span>
+                    <span className="text-xs text-slate-500">({getWorkoutCount(key)})</span>
+                  </button>
+                  {routine.subCategories.map(subCat => (
+                    <button
+                      key={subCat}
+                      onClick={() => handleSubCategorySelect(key, subCat)}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 flex justify-between items-center
+                        ${activeSubCategory === subCat ? colors.text : 'text-slate-300'}
+                      `}
+                    >
+                      <span>{subCat}</span>
+                      <span className="text-xs text-slate-500">({getWorkoutCount(key, subCat)})</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Add Routine Button */}
+        <button
+          onClick={onAddRoutine}
+          className="flex items-center gap-1 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-all"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Active Sub-Category Indicator */}
+      {activeSubCategory && activeSubCategory !== 'All' && (
+        <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+          <span>Filtering:</span>
+          <span className={`px-2 py-0.5 rounded-full ${COLOR_MAP[routines[activeRoutine]?.color]?.bg} ${COLOR_MAP[routines[activeRoutine]?.color]?.text}`}>
+            {activeSubCategory}
+          </span>
+          <button
+            onClick={() => setActiveSubCategory('All')}
+            className="text-slate-500 hover:text-slate-300"
+          >
+            ✕ Clear
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Add Routine Modal Component
+const AddRoutineModal = ({ isOpen, onClose, existingRoutines, onAdd }) => {
+  const [name, setName] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [subCategories, setSubCategories] = useState('');
+  const [color, setColor] = useState('purple');
+
+  // Preset templates
+  const PRESETS = [
+    {
+      key: 'upperlower',
+      name: 'U/L',
+      displayName: 'Upper/Lower',
+      subCategories: ['Upper', 'Lower'],
+      keywords: {
+        'Upper': ['upper', 'chest', 'back', 'shoulder', 'arm', 'bench', 'row', 'press'],
+        'Lower': ['lower', 'leg', 'squat', 'deadlift', 'lunge', 'calf', 'glute'],
+      },
+      color: 'purple',
+    },
+    {
+      key: 'brosplit',
+      name: 'Bro',
+      displayName: 'Bro Split',
+      subCategories: ['Chest', 'Back', 'Shoulders', 'Arms', 'Legs'],
+      keywords: {
+        'Chest': ['chest', 'bench', 'fly', 'pec'],
+        'Back': ['back', 'row', 'pull', 'lat'],
+        'Shoulders': ['shoulder', 'delt', 'ohp', 'lateral'],
+        'Arms': ['arm', 'bicep', 'tricep', 'curl'],
+        'Legs': ['leg', 'squat', 'lunge', 'calf'],
+      },
+      color: 'red',
+    },
+    {
+      key: 'strength',
+      name: '5x5',
+      displayName: '5x5 Strength',
+      subCategories: ['Workout A', 'Workout B'],
+      keywords: {
+        'Workout A': ['5x5 a', 'workout a', 'squat bench row'],
+        'Workout B': ['5x5 b', 'workout b', 'squat ohp deadlift'],
+      },
+      color: 'red',
+    },
+  ];
+
+  const handlePresetSelect = (preset) => {
+    setName(preset.name);
+    setDisplayName(preset.displayName);
+    setSubCategories(preset.subCategories.join(', '));
+    setColor(preset.color);
+  };
+
+  const handleSubmit = () => {
+    const routineKey = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const subCatArray = subCategories.split(',').map(s => s.trim()).filter(Boolean);
+
+    const newRoutine = {
+      name,
+      displayName: displayName || name,
+      icon: 'dumbbell',
+      color,
+      subCategories: subCatArray,
+      keywords: subCatArray.reduce((acc, cat) => {
+        acc[cat] = [cat.toLowerCase()];
+        return acc;
+      }, {}),
+      enabled: true,
+      order: Object.keys(existingRoutines).length + 1,
+    };
+
+    onAdd(routineKey, newRoutine);
+    setName('');
+    setDisplayName('');
+    setSubCategories('');
+    setColor('purple');
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 rounded-xl max-w-md w-full p-6 border border-slate-700">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">Add New Routine</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
+        </div>
+
+        {/* Presets */}
+        <div className="mb-4">
+          <div className="text-sm text-slate-400 mb-2">Quick Add:</div>
+          <div className="flex flex-wrap gap-2">
+            {PRESETS.filter(p => !existingRoutines[p.key]).map(preset => (
+              <button
+                key={preset.key}
+                onClick={() => handlePresetSelect(preset)}
+                className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm"
+              >
+                {preset.displayName}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="border-t border-slate-700 my-4"></div>
+
+        {/* Custom Form */}
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm text-slate-400">Tab Name (short)</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g., U/L"
+              className="w-full mt-1 px-3 py-2 bg-slate-700 rounded-lg border border-slate-600 focus:border-blue-500 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-slate-400">Full Name</label>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="e.g., Upper/Lower Split"
+              className="w-full mt-1 px-3 py-2 bg-slate-700 rounded-lg border border-slate-600 focus:border-blue-500 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-slate-400">Sub-categories (comma separated)</label>
+            <input
+              type="text"
+              value={subCategories}
+              onChange={(e) => setSubCategories(e.target.value)}
+              placeholder="e.g., Upper, Lower"
+              className="w-full mt-1 px-3 py-2 bg-slate-700 rounded-lg border border-slate-600 focus:border-blue-500 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-slate-400">Color</label>
+            <div className="flex gap-2 mt-1">
+              {Object.keys(COLOR_MAP).map(c => (
+                <button
+                  key={c}
+                  onClick={() => setColor(c)}
+                  className={`w-8 h-8 rounded-full ${COLOR_MAP[c].bg} border-2 ${color === c ? 'border-white' : 'border-transparent'}`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 bg-slate-700 rounded-lg hover:bg-slate-600"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={!name}
+            className="flex-1 px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50"
+          >
+            Add Routine
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================
 // MAIN WORKOUT & ANALYTICS SECTION
 // ============================================
 const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRange, appleHealth, measurements }) => {
@@ -3016,6 +3370,85 @@ const App = () => {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [dateRange, setDateRange] = useState(90);
 
+  // Routine system state
+  const [activeRoutine, setActiveRoutine] = useState('ppl');
+  const [activeSubCategory, setActiveSubCategory] = useState('All');
+  const [showAddRoutineModal, setShowAddRoutineModal] = useState(false);
+
+  // Default routines configuration
+  const defaultRoutines = {
+    ppl: {
+      name: 'PPL',
+      displayName: 'Push/Pull/Legs',
+      icon: 'dumbbell',
+      color: 'orange',
+      subCategories: ['Push', 'Pull', 'Legs'],
+      keywords: {
+        'Push': ['push', 'chest', 'shoulder', 'tricep', 'bench', 'press', 'incline', 'fly', 'dip'],
+        'Pull': ['pull', 'back', 'bicep', 'row', 'pulldown', 'curl', 'deadlift', 'lat'],
+        'Legs': ['leg', 'squat', 'lunge', 'calf', 'hamstring', 'quad', 'glute'],
+      },
+      enabled: true,
+      order: 1,
+    },
+    fullbody: {
+      name: 'Full Body',
+      displayName: 'Full Body',
+      icon: 'user',
+      color: 'blue',
+      subCategories: ['Workout A', 'Workout B'],
+      keywords: {
+        'Workout A': ['full body a', 'full body workout a', 'fba'],
+        'Workout B': ['full body b', 'full body workout b', 'fbb'],
+      },
+      enabled: true,
+      order: 2,
+    },
+    calisthenics: {
+      name: 'Cali',
+      displayName: 'Calisthenics',
+      icon: 'activity',
+      color: 'cyan',
+      subCategories: [],
+      keywords: {
+        'all': ['calisthenics', 'bodyweight', 'push up', 'pull up', 'dip', 'muscle up', 'handstand'],
+      },
+      enabled: true,
+      order: 3,
+    },
+    cardio: {
+      name: 'Cardio',
+      displayName: 'Cardio',
+      icon: 'heart',
+      color: 'green',
+      subCategories: ['Running', 'Walking', 'Swimming', 'Cycling'],
+      keywords: {
+        'Running': ['run', 'jog', 'sprint'],
+        'Walking': ['walk', 'hike', 'outdoor walk'],
+        'Swimming': ['swim', 'pool'],
+        'Cycling': ['cycle', 'bike', 'cycling'],
+      },
+      enabled: true,
+      order: 4,
+    },
+  };
+
+  const routines = data?.routines || defaultRoutines;
+
+  const handleAddRoutine = async (key, routine) => {
+    const updatedRoutines = { ...routines, [key]: routine };
+    try {
+      await fetch(`${API_BASE_URL}/routines`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routines: updatedRoutines }),
+      });
+      setData({ ...data, routines: updatedRoutines });
+    } catch (error) {
+      console.error('Failed to save routine:', error);
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -3332,10 +3765,31 @@ const App = () => {
           <WeeklyInsightsCard workouts={data.workouts} conditioning={data.conditioning} appleHealth={data.appleHealth} nutrition={data.nutrition} dateRange={dateRange} />
         </section>
 
-        {/* Analytics + Logs */}
-        <section>
+        {/* Analytics + Logs with Dynamic Routine Tabs */}
+        <section className="space-y-4">
+          {/* Routine Tabs */}
+          <RoutineTabs
+            routines={routines}
+            workouts={data.workouts}
+            conditioning={data.conditioning}
+            activeRoutine={activeRoutine}
+            setActiveRoutine={setActiveRoutine}
+            activeSubCategory={activeSubCategory}
+            setActiveSubCategory={setActiveSubCategory}
+            onAddRoutine={() => setShowAddRoutineModal(true)}
+          />
+
+          {/* Workout Analytics Section (uses routine filtering internally) */}
           <WorkoutAnalyticsSection workouts={data.workouts} conditioning={data.conditioning} dateRange={dateRange} setDateRange={setDateRange} appleHealth={data.appleHealth} measurements={data.measurements} />
         </section>
+
+        {/* Add Routine Modal */}
+        <AddRoutineModal
+          isOpen={showAddRoutineModal}
+          onClose={() => setShowAddRoutineModal(false)}
+          existingRoutines={routines}
+          onAdd={handleAddRoutine}
+        />
       </main>
       
       {/* Footer */}
