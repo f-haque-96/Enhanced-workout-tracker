@@ -1063,14 +1063,12 @@ const HealthScoreBodyStatsCard = ({ measurements, appleHealth, conditioning, wor
   const trendColor = weightChange <= 0 ? '#22c55e' : '#ef4444'; // Green if losing (cutting)
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <Activity className="w-4 h-4 text-green-400" />
-          Health Score & Body Stats
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="card h-full">
+      <div className="flex items-center gap-2 mb-4">
+        <Activity className="w-5 h-5 text-green-400" />
+        <h3 className="text-lg font-semibold text-white">Health Score & Body Stats</h3>
+      </div>
+      <div className="space-y-4">
 
         {/* Health Score - No Decimals */}
         <div className="flex items-center justify-between">
@@ -1158,8 +1156,8 @@ const HealthScoreBodyStatsCard = ({ measurements, appleHealth, conditioning, wor
           </div>
         )}
 
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 };
 
