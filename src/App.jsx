@@ -240,66 +240,35 @@ const normalizeAppleHealth = (raw) => {
 const normalizeApiData = (raw) => {
   if (!raw) {
     console.error('normalizeApiData: received null/undefined');
-    return null;
+    return {
+      workouts: [],
+      conditioning: [],
+      measurements: { current: {}, starting: {}, history: [] },
+      appleHealth: {},
+      nutrition: { dailyCalorieIntake: {} },
+      routines: null,
+    };
   }
 
-  // Debug: Log what we received
-  console.log('📥 Raw API data:', {
+  console.log('📥 Raw API data received:', {
     workouts: raw.workouts?.length || 0,
     conditioning: raw.conditioning?.length || 0,
     measurements: !!raw.measurements,
     appleHealth: !!raw.appleHealth,
+    nutrition: !!raw.nutrition,
   });
 
-  // CRITICAL: Preserve conditioning data - don't transform it away!
-  let normalizedConditioning = [];
-
-  if (raw.conditioning && Array.isArray(raw.conditioning)) {
-    normalizedConditioning = raw.conditioning.map(session => {
-      if (!session) return null;
-      return {
-        ...session,
-        date: session.date || session.startDate || session.Start_Date,
-        activeCalories: session.activeCalories ?? session.calories ?? session.Calories ?? 0,
-        avgHeartRate: session.avgHeartRate ?? session.averageHeartRate ?? session.hr_avg ?? 0,
-        maxHeartRate: session.maxHeartRate ?? session.maximumHeartRate ?? session.hr_max ?? 0,
-        duration: session.duration ?? session.Duration ?? 0,
-        distance: session.distance ?? session.Distance ?? 0,
-        steps: session.steps ?? session.Steps ?? 0,
-        type: session.type ?? session.Type ?? 'Workout',
-        category: session.category ?? 'other',
-      };
-    }).filter(Boolean);
-
-    console.log('✅ Normalized conditioning:', normalizedConditioning.length);
-  } else {
-    console.warn('⚠️ No conditioning array in raw data');
-  }
-
-  // Normalize workouts
-  let normalizedWorkouts = [];
-  if (raw.workouts && Array.isArray(raw.workouts)) {
-    normalizedWorkouts = raw.workouts.map(w => ({
-      ...w,
-      // Preserve all existing data
-    })).filter(Boolean);
-  }
-
+  // CRITICAL: Simply pass through the data, don't over-process it!
   const result = {
-    workouts: normalizedWorkouts,
-    conditioning: normalizedConditioning,
+    workouts: raw.workouts || [],
+    conditioning: raw.conditioning || [], // DON'T filter or transform!
     measurements: raw.measurements || { current: {}, starting: {}, history: [] },
     appleHealth: raw.appleHealth || {},
     nutrition: raw.nutrition || { dailyCalorieIntake: {} },
+    routines: raw.routines || null,
     lastSync: raw.lastSync,
     lastWebhook: raw.lastWebhook,
   };
-
-  // VERIFY conditioning wasn't lost
-  if (raw.conditioning?.length > 0 && result.conditioning.length === 0) {
-    console.error('❌ CONDITIONING WAS LOST! Using raw data as fallback');
-    result.conditioning = raw.conditioning;
-  }
 
   console.log('📤 Normalized result:', {
     workouts: result.workouts.length,
