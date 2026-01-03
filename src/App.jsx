@@ -2579,9 +2579,9 @@ const RoutineTabs = ({
   };
 
   return (
-    <div className="relative">
+    <div className="relative z-50">
       {/* Tab Bar */}
-      <div className="flex items-center gap-1 overflow-x-auto pb-2 scrollbar-hide">
+      <div className="flex items-center gap-1 overflow-x-auto overflow-visible pb-2 scrollbar-hide">
         {sortedRoutines.map(([key, routine]) => {
           const Icon = ICON_MAP[routine.icon] || Dumbbell;
           const colors = COLOR_MAP[routine.color] || COLOR_MAP.orange;
@@ -2616,7 +2616,7 @@ const RoutineTabs = ({
 
               {/* Dropdown */}
               {hasDropdown && openDropdown === key && (
-                <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 min-w-[140px]">
+                <div className="absolute top-full left-0 mt-1 z-[9999] bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[140px]">
                   <button
                     onClick={() => handleSubCategorySelect(key, 'All')}
                     className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 flex justify-between items-center
@@ -2959,15 +2959,8 @@ const WorkoutAnalyticsSection = ({ workouts, conditioning, dateRange, setDateRan
   
   return (
     <div className="card">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0">
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setActiveTab(t.id)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${activeTab === t.id ? `bg-gradient-to-r ${t.color.gradient} text-white shadow-lg ${t.color.glow}` : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}>
-              <t.icon size={16} />{t.label}
-            </button>
-          ))}
-        </div>
+      {/* Header - Tab row removed, now using RoutineTabs above */}
+      <div className="flex items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-2">
           <button onClick={() => setShowComparison(!showComparison)} className={`px-3 py-1.5 text-xs rounded-md transition-all flex items-center gap-1 ${showComparison ? 'bg-purple-500 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}><BarChart3 size={14} />Compare</button>
           <DateRangeSelector selectedDays={dateRange} onSelect={setDateRange} />
@@ -3736,20 +3729,24 @@ const App = () => {
 
         {/* Analytics + Logs with Dynamic Routine Tabs */}
         <section className="space-y-4">
-          {/* Routine Tabs */}
-          <RoutineTabs
-            routines={routines}
-            workouts={data.workouts}
-            conditioning={data.conditioning}
-            activeRoutine={activeRoutine}
-            setActiveRoutine={setActiveRoutine}
-            activeSubCategory={activeSubCategory}
-            setActiveSubCategory={setActiveSubCategory}
-            onAddRoutine={() => setShowAddRoutineModal(true)}
-          />
+          {/* Routine Tabs - High z-index for dropdown visibility */}
+          <div className="relative z-50">
+            <RoutineTabs
+              routines={routines}
+              workouts={data.workouts}
+              conditioning={data.conditioning}
+              activeRoutine={activeRoutine}
+              setActiveRoutine={setActiveRoutine}
+              activeSubCategory={activeSubCategory}
+              setActiveSubCategory={setActiveSubCategory}
+              onAddRoutine={() => setShowAddRoutineModal(true)}
+            />
+          </div>
 
-          {/* Workout Analytics Section (uses routine filtering internally) */}
-          <WorkoutAnalyticsSection workouts={data.workouts} conditioning={data.conditioning} dateRange={dateRange} setDateRange={setDateRange} appleHealth={data.appleHealth} measurements={data.measurements} />
+          {/* Workout Analytics Section - Lower z-index */}
+          <div className="relative z-0">
+            <WorkoutAnalyticsSection workouts={data.workouts} conditioning={data.conditioning} dateRange={dateRange} setDateRange={setDateRange} appleHealth={data.appleHealth} measurements={data.measurements} />
+          </div>
         </section>
 
         {/* Add Routine Modal */}
