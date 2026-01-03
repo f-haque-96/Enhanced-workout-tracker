@@ -1,265 +1,677 @@
-## FIX: Tabs Not Switching + Dropdowns Not Opening
+## FIX: Workout Log Details, Missing Cards, Tab Filtering Not Working
 
-The tab system is broken:
-1. Cannot switch between tabs (clicking PPL when on Cali doesn't work)
-2. Dropdowns don't open when clicking tabs with sub-categories
-3. UI appears frozen on selected tab
+### ISSUE 1: Workout Log Missing Details
 
-### STEP 1: Debug Current State
-```bash
-ssh pi@192.168.1.73
-cd ~/hit-tracker-pro
+The workout log should show:
+- Exercise names with sets, reps, weight
+- Duration
+- Apple Health data (HR, Calories)
+- Expandable/collapsible workout details
 
-# Check the RoutineTabs component
-grep -n "handleTabClick\|setActiveRoutine\|openDropdown" src/App.jsx | head -30
+**Replace the Workout Log section in RoutineContent:**
+```jsx
+// Enhanced Workout Log Item Component
+const WorkoutLogItem = ({ workout, isExpanded, onToggle }) => {
+  const appleHealth = workout.appleHealth || {};
+  const exercises = workout.exercises || [];
+  const duration = workout.duration || appleHealth.duration || 0;
+  const calories = appleHealth.activeCalories || workout.calories || 0;
+  const avgHR = appleHealth.avgHeartRate || workout.avgHeartRate || 0;
+  const maxHR = appleHealth.maxHeartRate || workout.maxHeartRate || 0;
+  
+  // Calculate totals
+  const totalSets = exercises.reduce((sum, ex) => sum + (ex.sets?.length || 0), 0);
+  const totalVolume = exercises.reduce((sum, ex) => 
+    sum + (ex.sets?.reduce((s, set) => s + ((set.weight_kg || set.weight || 0) * (set.reps || 0)), 0) || 0), 0
+  );
+  
+  const formatDuration = (seconds) => {
+    if (!seconds) return '--';
+    const mins = Math.floor(seconds / 60);
+    return `${mins}m`;
+  };
+  
+  return (
+    <div className="border-b border-slate-700/50 last:border-0">
+      {/* Workout Header - Clickable */}
+      <div 
+        className="py-3 px-2 cursor-pointer hover:bg-slate-700/20 rounded-lg transition-colors"
+        onClick={onToggle}
+      >
+        <div className="flex justify-between items-start">
+          <div className="flex-1">
+            <div className="font-medium text-slate-200">{workout.title || workout.name || workout.type}</div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {new Date(workout.start_time || workout.date).toLocaleDateString('en-GB', {
+                weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
+              })}
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            {totalSets > 0 && (
+              <span className="text-slate-400">{totalSets} sets</span>
+            )}
+            {duration > 0 && (
+              <span className="text-slate-400">{formatDuration(duration)}</span>
+            )}
+            {calories > 0 && (
+              <span className="text-orange-400">{calories} kcal</span>
+            )}
+            {avgHR > 0 && (
+              <span className="text-red-400">❤️ {avgHR}</span>
+            )}
+            <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+          </div>
+        </div>
+        
+        {/* Apple Health Badge */}
+        {(calories > 0 || avgHR > 0) && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[10px] px-2 py-0.5 bg-red-500/20 text-red-400 rounded-full flex items-center gap-1">
+              <Heart className="w-3 h-3" /> Apple Health
+            </span>
+            {avgHR > 0 && maxHR > 0 && (
+              <span className="text-[10px] text-slate-500">
+                HR: {avgHR} avg / {maxHR} max
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      
+      {/* Expanded Exercise Details */}
+      {isExpanded && exercises.length > 0 && (
+        <div className="pb-3 px-2 space-y-2">
+          {exercises.map((exercise, exIdx) => (
+            <div key={exIdx} className="bg-slate-800/50 rounded-lg p-3">
+              <div className="font-medium text-sm text-slate-300 mb-2">{exercise.name || exercise.title}</div>
+              <div className="space-y-1">
+                {(exercise.sets || []).map((set, setIdx) => {
+                  const setType = set.set_type || set.type || 'working';
+                  const isWarmup = setType === 'warmup';
+                  const isFailure = setType === 'failure' || set.rpe >= 10;
+                  
+                  return (
+                    <div 
+                      key={setIdx} 
+                      className={`flex items-center gap-3 text-sm py-1 px-2 rounded ${
+                        isWarmup ? 'bg-yellow-500/10 text-yellow-300' :
+                        isFailure ? 'bg-red-500/10 text-red-300' :
+                        'text-slate-300'
+                      }`}
+                    >
+                      <span className="w-6 text-xs text-slate-500">#{setIdx + 1}</span>
+                      <span className="font-medium">{set.weight_kg || set.weight || 0} kg</span>
+                      <span>×</span>
+                      <span>{set.reps || 0} reps</span>
+                      {set.rpe && <span className="text-xs text-slate-500">RPE {set.rpe}</span>}
+                      {isWarmup && <span className="text-xs bg-yellow-500/20 px-1.5 rounded">Warmup</span>}
+                      {isFailure && <span className="text-xs bg-red-500/20 px-1.5 rounded">Failure</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          
+          {/* Workout Summary */}
+          <div className="flex gap-4 text-xs text-slate-500 pt-2 border-t border-slate-700/50">
+            <span>Total: {totalSets} sets</span>
+            <span>Volume: {(totalVolume / 1000).toFixed(1)}t</span>
+            {duration > 0 && <span>Duration: {formatDuration(duration)}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
-# Check for click handler issues
-grep -n "onClick.*handleTabClick\|onClick.*setActive" src/App.jsx | head -20
+// In RoutineContent, update the Workout Log card:
+const [expandedWorkouts, setExpandedWorkouts] = useState({});
+
+const toggleWorkout = (workoutId) => {
+  setExpandedWorkouts(prev => ({
+    ...prev,
+    [workoutId]: !prev[workoutId]
+  }));
+};
+
+// Render:
+<div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+  <div className="flex justify-between items-center mb-3">
+    <div className="text-sm font-medium text-slate-300">
+      Workout Log
+    </div>
+    <span className="text-xs text-slate-500">({filteredWorkouts.length})</span>
+  </div>
+  
+  {filteredWorkouts.length > 0 ? (
+    <div className="divide-y divide-slate-700/50">
+      {filteredWorkouts.slice(0, 10).map((workout, idx) => (
+        <WorkoutLogItem 
+          key={workout.id || idx} 
+          workout={workout}
+          isExpanded={expandedWorkouts[workout.id || idx]}
+          onToggle={() => toggleWorkout(workout.id || idx)}
+        />
+      ))}
+    </div>
+  ) : (
+    <div className="text-center text-slate-500 py-8">
+      No workouts found for this filter.
+    </div>
+  )}
+</div>
 ```
 
-### STEP 2: Fix the Tab Click Handler
+---
 
-The issue is likely in the click handler logic. Replace the RoutineTabs component with this fixed version:
+### ISSUE 2: Add Missing Cards (Achievements, PRs, Strength Forecast, 1RM)
+
+Add these cards to the RoutineContent component:
 ```jsx
-const RoutineTabs = ({ 
-  routines, 
+const RoutineContent = ({ 
+  routine, 
+  subCategory, 
   workouts, 
   conditioning,
-  activeRoutine, 
-  setActiveRoutine,
-  activeSubCategory,
-  setActiveSubCategory,
-  onAddRoutine,
+  dateRange,
+  bodyWeight,
 }) => {
-  const [openDropdown, setOpenDropdown] = useState(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  // ... existing filtering logic ...
   
-  // Sort routines by order
-  const sortedRoutines = useMemo(() => {
-    if (!routines) return [];
-    return Object.entries(routines)
-      .filter(([_, r]) => r && r.enabled !== false)
-      .sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
-  }, [routines]);
+  // Calculate Key Lifts / 1RM for this routine
+  const keyLifts = useMemo(() => {
+    const exerciseMaxes = {};
+    
+    filteredWorkouts.forEach(workout => {
+      (workout.exercises || []).forEach(exercise => {
+        const name = exercise.name || exercise.title;
+        if (!name) return;
+        
+        (exercise.sets || []).forEach(set => {
+          const weight = set.weight_kg || set.weight || 0;
+          const reps = set.reps || 0;
+          if (weight <= 0 || reps <= 0) return;
+          
+          // Estimate 1RM using Epley formula
+          const estimated1RM = weight * (1 + reps / 30);
+          
+          if (!exerciseMaxes[name] || estimated1RM > exerciseMaxes[name].estimated1RM) {
+            exerciseMaxes[name] = {
+              name,
+              weight,
+              reps,
+              estimated1RM,
+              date: workout.start_time || workout.date,
+            };
+          }
+        });
+      });
+    });
+    
+    return Object.values(exerciseMaxes)
+      .sort((a, b) => b.estimated1RM - a.estimated1RM)
+      .slice(0, 5);
+  }, [filteredWorkouts]);
   
-  // Count workouts for a routine/subcategory
-  const getWorkoutCount = useCallback((routineKey, subCategory = null) => {
-    const routine = routines?.[routineKey];
-    if (!routine) return 0;
+  // Calculate Recent PRs
+  const recentPRs = useMemo(() => {
+    const prs = [];
+    const exerciseBests = {};
     
-    const isCardio = routineKey === 'cardio';
-    const data = isCardio ? (conditioning || []) : (workouts || []);
+    // Sort workouts by date (oldest first)
+    const sortedWorkouts = [...filteredWorkouts].sort((a, b) => 
+      new Date(a.start_time || a.date) - new Date(b.start_time || b.date)
+    );
     
-    return data.filter(w => {
-      const title = (w.title || w.name || w.type || '').toLowerCase();
+    sortedWorkouts.forEach(workout => {
+      (workout.exercises || []).forEach(exercise => {
+        const name = exercise.name || exercise.title;
+        if (!name) return;
+        
+        (exercise.sets || []).forEach(set => {
+          const weight = set.weight_kg || set.weight || 0;
+          const reps = set.reps || 0;
+          if (weight <= 0) return;
+          
+          const key = `${name}-${reps}`;
+          const prevBest = exerciseBests[key];
+          
+          if (!prevBest || weight > prevBest.weight) {
+            if (prevBest) {
+              // This is a PR!
+              prs.push({
+                exercise: name,
+                weight,
+                reps,
+                date: workout.start_time || workout.date,
+                improvement: weight - prevBest.weight,
+              });
+            }
+            exerciseBests[key] = { weight, reps };
+          }
+        });
+      });
+    });
+    
+    return prs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  }, [filteredWorkouts]);
+  
+  // Calculate Strength Forecast (10% improvement targets)
+  const strengthForecast = useMemo(() => {
+    return keyLifts.slice(0, 3).map(lift => ({
+      ...lift,
+      target1RM: Math.ceil(lift.estimated1RM * 1.1), // 10% improvement
+      targetWeight: Math.ceil(lift.weight * 1.1),
+    }));
+  }, [keyLifts]);
+  
+  // Calculate Achievements for this routine
+  const achievements = useMemo(() => {
+    if (!bodyWeight || bodyWeight <= 0) return { earned: [], inProgress: [] };
+    
+    const earned = [];
+    const inProgress = [];
+    
+    keyLifts.forEach(lift => {
+      const ratio = lift.estimated1RM / bodyWeight;
+      const liftName = lift.name.toLowerCase();
       
+      // Define achievement thresholds based on exercise type
+      let thresholds = [];
+      
+      if (liftName.includes('bench') || liftName.includes('incline')) {
+        thresholds = [
+          { mult: 1.0, name: `1x BW ${lift.name.split(' ').slice(0, 2).join(' ')}` },
+          { mult: 1.5, name: `1.5x BW ${lift.name.split(' ').slice(0, 2).join(' ')}` },
+        ];
+      } else if (liftName.includes('squat')) {
+        thresholds = [
+          { mult: 1.5, name: '1.5x BW Squat' },
+          { mult: 2.0, name: '2x BW Squat' },
+        ];
+      } else if (liftName.includes('deadlift')) {
+        thresholds = [
+          { mult: 2.0, name: '2x BW Deadlift' },
+          { mult: 2.5, name: '2.5x BW Deadlift' },
+        ];
+      } else if (liftName.includes('press') || liftName.includes('ohp')) {
+        thresholds = [
+          { mult: 0.7, name: '0.7x BW OHP' },
+          { mult: 1.0, name: '1x BW OHP' },
+        ];
+      } else if (liftName.includes('row') || liftName.includes('pulldown')) {
+        thresholds = [
+          { mult: 1.0, name: `1x BW ${lift.name.split(' ').slice(0, 2).join(' ')}` },
+        ];
+      }
+      
+      thresholds.forEach(threshold => {
+        const progress = Math.min(100, Math.round((ratio / threshold.mult) * 100));
+        if (progress >= 100) {
+          earned.push({ name: threshold.name, icon: '🏆' });
+        } else {
+          inProgress.push({ 
+            name: threshold.name, 
+            progress,
+            current: lift.estimated1RM.toFixed(1),
+            target: (bodyWeight * threshold.mult).toFixed(1),
+          });
+        }
+      });
+    });
+    
+    return { earned, inProgress: inProgress.slice(0, 3) };
+  }, [keyLifts, bodyWeight]);
+  
+  // Determine if this is a cardio routine
+  const isCardio = routine?.name?.toLowerCase() === 'cardio';
+  const displayData = isCardio ? filteredConditioning : filteredWorkouts;
+  
+  return (
+    <div className="space-y-4">
+      
+      {/* Key Lifts (1RM) - Only for strength routines */}
+      {!isCardio && keyLifts.length > 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="text-sm font-medium text-slate-300 mb-3">Key Lifts (Est. 1RM)</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {keyLifts.map((lift, idx) => (
+              <div key={idx} className="bg-slate-900/50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-white">
+                  {lift.estimated1RM.toFixed(1)}
+                  <span className="text-xs text-slate-400 ml-1">kg</span>
+                </div>
+                <div className="text-xs text-slate-400 truncate mt-1" title={lift.name}>
+                  {lift.name.split(' ').slice(0, 2).join(' ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* Achievements - Only for strength routines */}
+      {!isCardio && (achievements.earned.length > 0 || achievements.inProgress.length > 0) && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="flex justify-between items-center mb-3">
+            <div className="text-sm font-medium text-slate-300 flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-amber-400" />
+              Achievements
+            </div>
+            {achievements.earned.length > 0 && (
+              <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded-full">
+                {achievements.earned.length} Earned
+              </span>
+            )}
+          </div>
+          
+          {/* Earned */}
+          {achievements.earned.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {achievements.earned.map((ach, idx) => (
+                <div key={idx} className="flex items-center gap-1.5 bg-amber-500/20 text-amber-300 px-3 py-1.5 rounded-lg text-sm">
+                  <span>{ach.icon}</span>
+                  <span>{ach.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* In Progress */}
+          {achievements.inProgress.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs text-slate-500">In Progress</div>
+              {achievements.inProgress.map((ach, idx) => (
+                <div key={idx}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-slate-300">{ach.name}</span>
+                    <span className="text-slate-500 text-xs">{ach.current}/{ach.target} kg</span>
+                  </div>
+                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-amber-500 rounded-full transition-all"
+                      style={{ width: `${ach.progress}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* Recent PRs */}
+      {!isCardio && recentPRs.length > 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-green-400" />
+            Recent PRs
+          </div>
+          <div className="space-y-2">
+            {recentPRs.map((pr, idx) => (
+              <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-700/50 last:border-0">
+                <div>
+                  <div className="font-medium text-sm">{pr.exercise}</div>
+                  <div className="text-xs text-slate-500">
+                    {new Date(pr.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-green-400">{pr.weight} kg × {pr.reps}</div>
+                  <div className="text-xs text-green-500">+{pr.improvement} kg</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* Strength Forecast */}
+      {!isCardio && strengthForecast.length > 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+            <Target className="w-4 h-4 text-blue-400" />
+            Strength Forecast (+10%)
+          </div>
+          <div className="space-y-3">
+            {strengthForecast.map((lift, idx) => (
+              <div key={idx} className="flex justify-between items-center">
+                <div className="text-sm text-slate-400">{lift.name.split(' ').slice(0, 2).join(' ')}</div>
+                <div className="flex items-center gap-3">
+                  <span className="text-slate-500">{lift.estimated1RM.toFixed(1)} kg</span>
+                  <span className="text-slate-600">→</span>
+                  <span className="text-blue-400 font-medium">{lift.target1RM} kg</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* Overview Card */}
+      {/* ... existing overview card ... */}
+      
+      {/* Muscle Distribution */}
+      {/* ... existing muscle distribution ... */}
+      
+      {/* Workout Log */}
+      {/* ... updated workout log with expandable items ... */}
+      
+    </div>
+  );
+};
+```
+
+---
+
+### ISSUE 3: Fix Tab Filtering for Cardio and Other Tabs
+
+The filtering is not working for Cardio because it uses `conditioning` data, not `workouts`. Fix the filtering logic:
+```jsx
+const RoutineContent = ({ 
+  routine, 
+  subCategory, 
+  workouts, 
+  conditioning,
+  dateRange,
+  bodyWeight,
+}) => {
+  // Determine if this is a cardio routine
+  const isCardio = routine?.name?.toLowerCase() === 'cardio';
+  
+  // Filter WORKOUTS for strength routines
+  const filteredWorkouts = useMemo(() => {
+    if (!routine || isCardio) return [];
+    if (!workouts || !Array.isArray(workouts)) return [];
+    
+    return workouts.filter(workout => {
+      const title = (workout.title || workout.name || '').toLowerCase();
+      
+      // If sub-category is selected (not "All"), filter by sub-category keywords
       if (subCategory && subCategory !== 'All') {
         const keywords = routine.keywords?.[subCategory] || [];
         return keywords.some(kw => title.includes(kw.toLowerCase()));
       }
       
+      // If "All" selected, match any keyword in this routine
       const allKeywords = Object.values(routine.keywords || {}).flat();
+      if (allKeywords.length === 0) return true; // No keywords = show all
       return allKeywords.some(kw => title.includes(kw.toLowerCase()));
-    }).length;
-  }, [routines, workouts, conditioning]);
+    });
+  }, [routine, subCategory, workouts, isCardio]);
   
-  // Handle tab click - FIXED VERSION
-  const handleTabClick = useCallback((routineKey, event) => {
-    event.stopPropagation(); // Prevent event bubbling
+  // Filter CONDITIONING for cardio
+  const filteredConditioning = useMemo(() => {
+    if (!routine || !isCardio) return [];
+    if (!conditioning || !Array.isArray(conditioning)) return [];
     
-    const routine = routines?.[routineKey];
-    const hasDropdown = routine?.subCategories && routine.subCategories.length > 0;
+    console.log('Filtering conditioning:', {
+      total: conditioning.length,
+      subCategory,
+      keywords: routine.keywords,
+    });
     
-    console.log('Tab clicked:', { routineKey, hasDropdown, currentActive: activeRoutine, currentDropdown: openDropdown });
-    
-    if (hasDropdown) {
-      // Tab has dropdown
-      if (activeRoutine === routineKey) {
-        // Already on this tab - toggle dropdown
-        if (openDropdown === routineKey) {
-          setOpenDropdown(null);
-        } else {
-          // Open dropdown
-          const rect = event.currentTarget.getBoundingClientRect();
-          setDropdownPosition({
-            top: rect.bottom + 4,
-            left: rect.left,
-          });
-          setOpenDropdown(routineKey);
+    return conditioning.filter(session => {
+      const type = (session.type || session.category || session.name || '').toLowerCase();
+      
+      // If sub-category is selected (not "All"), filter by sub-category keywords
+      if (subCategory && subCategory !== 'All') {
+        const keywords = routine.keywords?.[subCategory] || [];
+        return keywords.some(kw => type.includes(kw.toLowerCase()));
+      }
+      
+      // If "All" selected for cardio, show ALL conditioning
+      return true; // Show all conditioning for cardio
+    });
+  }, [routine, subCategory, conditioning, isCardio]);
+  
+  // Use the appropriate data based on routine type
+  const displayData = isCardio ? filteredConditioning : filteredWorkouts;
+  
+  console.log('RoutineContent:', {
+    routineName: routine?.name,
+    isCardio,
+    subCategory,
+    filteredWorkouts: filteredWorkouts.length,
+    filteredConditioning: filteredConditioning.length,
+    displayData: displayData.length,
+  });
+  
+  // Calculate stats from the correct data source
+  const stats = useMemo(() => {
+    if (isCardio) {
+      // Cardio stats from conditioning
+      let totalDuration = 0;
+      let totalCalories = 0;
+      let totalDistance = 0;
+      let totalHR = 0;
+      let hrCount = 0;
+      
+      filteredConditioning.forEach(session => {
+        totalDuration += session.duration || 0;
+        totalCalories += session.activeCalories || session.calories || 0;
+        totalDistance += session.distance || 0;
+        if (session.avgHeartRate) {
+          totalHR += session.avgHeartRate;
+          hrCount++;
         }
-      } else {
-        // Switching to this tab
-        setActiveRoutine(routineKey);
-        setActiveSubCategory('All');
-        // Open dropdown immediately
-        const rect = event.currentTarget.getBoundingClientRect();
-        setDropdownPosition({
-          top: rect.bottom + 4,
-          left: rect.left,
-        });
-        setOpenDropdown(routineKey);
-      }
-    } else {
-      // Tab without dropdown (like Cali)
-      setActiveRoutine(routineKey);
-      setActiveSubCategory('All');
-      setOpenDropdown(null);
+      });
+      
+      return {
+        workouts: filteredConditioning.length,
+        duration: totalDuration,
+        calories: totalCalories,
+        distance: totalDistance,
+        avgHR: hrCount > 0 ? Math.round(totalHR / hrCount) : 0,
+        // Not applicable for cardio
+        workingSets: 0,
+        warmupSets: 0,
+        failureSets: 0,
+        totalReps: 0,
+        totalVolume: 0,
+        muscleDistribution: [],
+      };
     }
-  }, [routines, activeRoutine, openDropdown, setActiveRoutine, setActiveSubCategory]);
-  
-  // Handle sub-category selection
-  const handleSubCategorySelect = useCallback((routineKey, subCat) => {
-    console.log('SubCategory selected:', { routineKey, subCat });
-    setActiveRoutine(routineKey);
-    setActiveSubCategory(subCat);
-    setOpenDropdown(null);
-  }, [setActiveRoutine, setActiveSubCategory]);
-  
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      // Don't close if clicking on a tab button or dropdown
-      if (event.target.closest('.routine-tab-btn') || event.target.closest('.routine-dropdown-menu')) {
-        return;
-      }
-      setOpenDropdown(null);
-    };
     
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-  
-  const ICON_MAP = {
-    'dumbbell': Dumbbell,
-    'user': User,
-    'heart': Heart,
-    'person-standing': User, // Fallback if PersonStanding not available
-  };
-  
-  const COLOR_MAP = {
-    'orange': { bg: 'bg-orange-500/20', text: 'text-orange-400', border: 'border-orange-500/30' },
-    'blue': { bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/30' },
-    'cyan': { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/30' },
-    'green': { bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500/30' },
-    'purple': { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30' },
-    'red': { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/30' },
-  };
+    // Strength stats (existing logic)
+    // ... keep existing strength stats calculation ...
+  }, [isCardio, filteredWorkouts, filteredConditioning]);
   
   return (
-    <div className="relative">
-      {/* Tab Buttons Row */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {sortedRoutines.map(([key, routine]) => {
-          const Icon = ICON_MAP[routine.icon] || Dumbbell;
-          const colors = COLOR_MAP[routine.color] || COLOR_MAP.orange;
-          const isActive = activeRoutine === key;
-          const hasDropdown = routine.subCategories && routine.subCategories.length > 0;
-          const count = getWorkoutCount(key);
-          const isDropdownOpen = openDropdown === key;
-          
-          return (
-            <div key={key} className="relative">
-              {/* Tab Button */}
-              <button
-                className={`
-                  routine-tab-btn
-                  flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
-                  transition-all duration-200 whitespace-nowrap cursor-pointer
-                  ${isActive 
-                    ? `${colors.bg} ${colors.text} ${colors.border} border` 
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent'
-                  }
-                `}
-                onClick={(e) => handleTabClick(key, e)}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{routine.name}</span>
-                {hasDropdown && (
-                  <ChevronDown 
-                    className={`w-3 h-3 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} 
-                  />
-                )}
-                {count > 0 && (
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full ml-1 ${
-                    isActive ? 'bg-slate-900/50' : 'bg-slate-700/50'
-                  }`}>
-                    {count}
-                  </span>
-                )}
-              </button>
-              
-              {/* Dropdown Menu - Rendered inline with high z-index */}
-              {hasDropdown && isDropdownOpen && (
-                <div 
-                  className="routine-dropdown-menu absolute top-full left-0 mt-1 z-[9999] bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[160px]"
-                  style={{ 
-                    position: 'fixed',
-                    top: dropdownPosition.top,
-                    left: dropdownPosition.left,
-                  }}
-                >
-                  {/* All Option */}
-                  <button
-                    className={`w-full text-left px-4 py-2.5 text-sm hover:bg-slate-700/50 flex justify-between items-center transition-colors ${
-                      activeSubCategory === 'All' ? `${colors.text} font-medium` : 'text-slate-300'
-                    }`}
-                    onClick={() => handleSubCategorySelect(key, 'All')}
-                  >
-                    <span className="flex items-center gap-2">
-                      {activeSubCategory === 'All' && <span className="w-1.5 h-1.5 rounded-full bg-current" />}
-                      All
-                    </span>
-                    <span className="text-xs text-slate-500">{getWorkoutCount(key)}</span>
-                  </button>
-                  
-                  {/* Divider */}
-                  <div className="border-t border-slate-700 my-1" />
-                  
-                  {/* Sub-categories */}
-                  {routine.subCategories.map(subCat => (
-                    <button
-                      key={subCat}
-                      className={`w-full text-left px-4 py-2.5 text-sm hover:bg-slate-700/50 flex justify-between items-center transition-colors ${
-                        activeSubCategory === subCat ? `${colors.text} font-medium` : 'text-slate-300'
-                      }`}
-                      onClick={() => handleSubCategorySelect(key, subCat)}
-                    >
-                      <span className="flex items-center gap-2">
-                        {activeSubCategory === subCat && <span className="w-1.5 h-1.5 rounded-full bg-current" />}
-                        {subCat}
-                      </span>
-                      <span className="text-xs text-slate-500">{getWorkoutCount(key, subCat)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+    <div className="space-y-4">
+      {/* Cardio-specific Overview */}
+      {isCardio && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="text-sm font-medium text-slate-300 mb-3">Cardio Overview</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-white">{stats.workouts}</div>
+              <div className="text-xs text-slate-400">Sessions</div>
             </div>
-          );
-        })}
-        
-        {/* Add Routine Button */}
-        <button
-          className="flex items-center justify-center w-9 h-9 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-colors border border-transparent"
-          onClick={onAddRoutine}
-          title="Add new routine"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
+            <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-green-400">
+                {(stats.distance / 1000).toFixed(1)}
+                <span className="text-sm">km</span>
+              </div>
+              <div className="text-xs text-slate-400">Distance</div>
+            </div>
+            <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-orange-400">{stats.calories}</div>
+              <div className="text-xs text-slate-400">Calories</div>
+            </div>
+            <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-red-400">{stats.avgHR}</div>
+              <div className="text-xs text-slate-400">Avg HR</div>
+            </div>
+          </div>
+        </div>
+      )}
       
-      {/* Active Filter Indicator */}
-      {activeSubCategory && activeSubCategory !== 'All' && (
-        <div className="flex items-center gap-2 mt-2 text-xs">
-          <span className="text-slate-500">Filtering:</span>
-          <span className={`px-2 py-1 rounded-full ${COLOR_MAP[routines[activeRoutine]?.color]?.bg || 'bg-slate-700'} ${COLOR_MAP[routines[activeRoutine]?.color]?.text || 'text-slate-300'}`}>
-            {activeSubCategory}
-          </span>
-          <button 
-            onClick={() => setActiveSubCategory('All')}
-            className="text-slate-500 hover:text-slate-300 ml-1"
-          >
-            ✕ Clear
-          </button>
+      {/* Strength Overview - only for non-cardio */}
+      {!isCardio && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          {/* ... existing strength overview ... */}
+        </div>
+      )}
+      
+      {/* Key Lifts, Achievements, PRs - only for strength */}
+      {!isCardio && (
+        <>
+          {/* ... key lifts, achievements, PRs cards ... */}
+        </>
+      )}
+      
+      {/* Cardio Session Log */}
+      {isCardio && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="flex justify-between items-center mb-3">
+            <div className="text-sm font-medium text-slate-300">Session Log</div>
+            <span className="text-xs text-slate-500">({filteredConditioning.length})</span>
+          </div>
+          
+          {filteredConditioning.length > 0 ? (
+            <div className="space-y-2">
+              {filteredConditioning.slice(0, 10).map((session, idx) => (
+                <div key={session.id || idx} className="flex justify-between items-center py-2 border-b border-slate-700/50 last:border-0">
+                  <div>
+                    <div className="font-medium text-sm">{session.type || 'Workout'}</div>
+                    <div className="text-xs text-slate-500">
+                      {new Date(session.date).toLocaleDateString('en-GB', {
+                        weekday: 'short', day: 'numeric', month: 'short'
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    {session.duration > 0 && (
+                      <span className="text-slate-400">{Math.round(session.duration / 60)}m</span>
+                    )}
+                    {session.distance > 0 && (
+                      <span className="text-green-400">{(session.distance / 1000).toFixed(1)} km</span>
+                    )}
+                    {(session.activeCalories || session.calories) > 0 && (
+                      <span className="text-orange-400">{session.activeCalories || session.calories} kcal</span>
+                    )}
+                    {session.avgHeartRate > 0 && (
+                      <span className="text-red-400">❤️ {session.avgHeartRate}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-slate-500 py-8">
+              No cardio sessions found for this filter.
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* Strength Workout Log - only for non-cardio */}
+      {!isCardio && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          {/* ... existing workout log ... */}
         </div>
       )}
     </div>
@@ -267,116 +679,48 @@ const RoutineTabs = ({
 };
 ```
 
-### STEP 3: Ensure State is Properly Initialized
+---
 
-In the main App component, make sure the state is correctly set up:
+### ISSUE 4: Ensure Calisthenics Tab Works
+
+For Calisthenics, we need to match workouts that contain bodyweight exercises:
 ```jsx
-// At the top of App component
-const [activeRoutine, setActiveRoutine] = useState('ppl');
-const [activeSubCategory, setActiveSubCategory] = useState('All');
-const [showAddRoutineModal, setShowAddRoutineModal] = useState(false);
-
-// Default routines
+// Update default routines to have better calisthenics keywords:
 const defaultRoutines = {
-  ppl: {
-    name: 'PPL',
-    displayName: 'Push/Pull/Legs',
-    icon: 'dumbbell',
-    color: 'orange',
-    subCategories: ['Push', 'Pull', 'Legs'],
-    keywords: {
-      'Push': ['push', 'chest', 'shoulder', 'tricep', 'bench', 'incline', 'ohp', 'press', 'fly', 'dip'],
-      'Pull': ['pull', 'back', 'bicep', 'row', 'pulldown', 'lat', 'curl', 'deadlift'],
-      'Legs': ['leg', 'squat', 'lunge', 'calf', 'hamstring', 'quad', 'glute'],
-    },
-    enabled: true,
-    order: 1,
-  },
-  fullbody: {
-    name: 'Full Body',
-    displayName: 'Full Body',
-    icon: 'user',
-    color: 'blue',
-    subCategories: ['Workout A', 'Workout B'],
-    keywords: {
-      'Workout A': ['full body a', 'workout a', 'fba'],
-      'Workout B': ['full body b', 'workout b', 'fbb'],
-    },
-    enabled: true,
-    order: 2,
-  },
+  // ... other routines ...
   calisthenics: {
     name: 'Cali',
     displayName: 'Calisthenics',
     icon: 'person-standing',
     color: 'cyan',
-    subCategories: [], // NO dropdown for Cali
+    subCategories: [], // No dropdown
     keywords: {
-      'all': ['calisthenics', 'bodyweight', 'push up', 'pull up', 'dip', 'muscle up'],
+      'all': [
+        'calisthenics', 
+        'bodyweight', 
+        'push up', 'push-up', 'pushup',
+        'pull up', 'pull-up', 'pullup',
+        'dip', 'dips',
+        'muscle up', 'muscle-up',
+        'handstand',
+        'plank',
+        'burpee',
+        'cali', // Match "Cali" in workout title
+      ],
     },
     enabled: true,
     order: 3,
   },
-  cardio: {
-    name: 'Cardio',
-    displayName: 'Cardio',
-    icon: 'heart',
-    color: 'green',
-    subCategories: ['Running', 'Walking', 'Swimming', 'Cycling'],
-    keywords: {
-      'Running': ['run', 'jog', 'sprint'],
-      'Walking': ['walk', 'hike', 'outdoor walk'],
-      'Swimming': ['swim', 'pool'],
-      'Cycling': ['cycle', 'bike'],
-    },
-    enabled: true,
-    order: 4,
-  },
+  // ... other routines ...
 };
-
-// Use routines from data or defaults
-const routines = data?.routines || defaultRoutines;
 ```
 
-### STEP 4: Verify the Component is Rendered Correctly
-```jsx
-// In the main render, ensure RoutineTabs has all props:
-<div className="mb-6">
-  <RoutineTabs
-    routines={routines}
-    workouts={data?.workouts || []}
-    conditioning={data?.conditioning || []}
-    activeRoutine={activeRoutine}
-    setActiveRoutine={setActiveRoutine}
-    activeSubCategory={activeSubCategory}
-    setActiveSubCategory={setActiveSubCategory}
-    onAddRoutine={() => setShowAddRoutineModal(true)}
-  />
-</div>
-```
-
-### STEP 5: Add Console Logging for Debugging
-
-Add temporary debug logs to see what's happening:
-```jsx
-// In handleTabClick:
-console.log('🔵 Tab Click:', {
-  key: routineKey,
-  hasDropdown,
-  wasActive: activeRoutine === routineKey,
-  wasDropdownOpen: openDropdown === routineKey,
-});
-
-// After state changes:
-useEffect(() => {
-  console.log('📊 Tab State:', { activeRoutine, activeSubCategory, openDropdown });
-}, [activeRoutine, activeSubCategory, openDropdown]);
-```
+---
 
 ### DEPLOYMENT
 ```bash
 git add -A
-git commit -m "Fix: Tab switching and dropdown functionality"
+git commit -m "Fix: Workout log details, add missing cards, fix cardio/cali tab filtering"
 git push origin main
 
 ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && git pull && docker compose down && docker compose up -d --build"
@@ -385,9 +729,10 @@ ssh pi@192.168.1.73 "cd ~/hit-tracker-pro && git pull && docker compose down && 
 ### VERIFICATION
 
 After fix:
-1. [ ] Click PPL tab → dropdown opens showing All/Push/Pull/Legs
-2. [ ] Click Cali tab → switches to Cali (no dropdown, just selects)
-3. [ ] Click back on PPL → switches back, dropdown opens
-4. [ ] Select "Push" from dropdown → filter indicator shows, data filters
-5. [ ] Click outside dropdown → dropdown closes
-6. [ ] Console shows state changes correctly
+1. [ ] PPL tab shows Key Lifts, Achievements, PRs, Strength Forecast
+2. [ ] Workout Log items are expandable with sets/reps/weight
+3. [ ] Apple Health data (HR, calories) shows on workouts
+4. [ ] Cardio tab shows 24 sessions with correct stats
+5. [ ] Cali tab shows calisthenics workouts (if any exist)
+6. [ ] Full Body tab shows workouts
+7. [ ] Filtering by subcategory works correctly

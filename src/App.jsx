@@ -2516,7 +2516,123 @@ const COLOR_MAP = {
   'red': { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/30' },
 };
 
-// Routine Content Component with Filtering
+// Enhanced Workout Log Item Component
+const WorkoutLogItem = ({ workout, isExpanded, onToggle }) => {
+  const appleHealth = workout.appleHealth || {};
+  const exercises = workout.exercises || [];
+  const duration = workout.duration || appleHealth.duration || 0;
+  const calories = appleHealth.activeCalories || workout.calories || 0;
+  const avgHR = appleHealth.avgHeartRate || workout.avgHeartRate || 0;
+  const maxHR = appleHealth.maxHeartRate || workout.maxHeartRate || 0;
+
+  // Calculate totals
+  const totalSets = exercises.reduce((sum, ex) => sum + (ex.sets?.length || 0), 0);
+  const totalVolume = exercises.reduce((sum, ex) =>
+    sum + (ex.sets?.reduce((s, set) => s + ((set.weight_kg || set.weight || 0) * (set.reps || 0)), 0) || 0), 0
+  );
+
+  const formatDuration = (seconds) => {
+    if (!seconds) return '--';
+    const mins = Math.floor(seconds / 60);
+    return `${mins}m`;
+  };
+
+  return (
+    <div className="border-b border-slate-700/50 last:border-0">
+      {/* Workout Header - Clickable */}
+      <div
+        className="py-3 px-2 cursor-pointer hover:bg-slate-700/20 rounded-lg transition-colors"
+        onClick={onToggle}
+      >
+        <div className="flex justify-between items-start">
+          <div className="flex-1">
+            <div className="font-medium text-slate-200">{workout.title || workout.name || workout.type}</div>
+            <div className="text-xs text-slate-500 mt-0.5">
+              {new Date(workout.start_time || workout.date).toLocaleDateString('en-GB', {
+                weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'
+              })}
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            {totalSets > 0 && (
+              <span className="text-slate-400">{totalSets} sets</span>
+            )}
+            {duration > 0 && (
+              <span className="text-slate-400">{formatDuration(duration)}</span>
+            )}
+            {calories > 0 && (
+              <span className="text-orange-400">{calories} kcal</span>
+            )}
+            {avgHR > 0 && (
+              <span className="text-red-400">❤️ {avgHR}</span>
+            )}
+            <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+          </div>
+        </div>
+
+        {/* Apple Health Badge */}
+        {(calories > 0 || avgHR > 0) && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="text-[10px] px-2 py-0.5 bg-red-500/20 text-red-400 rounded-full flex items-center gap-1">
+              <Heart className="w-3 h-3" /> Apple Health
+            </span>
+            {avgHR > 0 && maxHR > 0 && (
+              <span className="text-[10px] text-slate-500">
+                HR: {avgHR} avg / {maxHR} max
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Expanded Exercise Details */}
+      {isExpanded && exercises.length > 0 && (
+        <div className="pb-3 px-2 space-y-2">
+          {exercises.map((exercise, exIdx) => (
+            <div key={exIdx} className="bg-slate-800/50 rounded-lg p-3">
+              <div className="font-medium text-sm text-slate-300 mb-2">{exercise.name || exercise.title}</div>
+              <div className="space-y-1">
+                {(exercise.sets || []).map((set, setIdx) => {
+                  const setType = set.set_type || set.type || 'working';
+                  const isWarmup = setType === 'warmup';
+                  const isFailure = setType === 'failure' || set.rpe >= 10;
+
+                  return (
+                    <div
+                      key={setIdx}
+                      className={`flex items-center gap-3 text-sm py-1 px-2 rounded ${
+                        isWarmup ? 'bg-yellow-500/10 text-yellow-300' :
+                        isFailure ? 'bg-red-500/10 text-red-300' :
+                        'text-slate-300'
+                      }`}
+                    >
+                      <span className="w-6 text-xs text-slate-500">#{setIdx + 1}</span>
+                      <span className="font-medium">{set.weight_kg || set.weight || 0} kg</span>
+                      <span>×</span>
+                      <span>{set.reps || 0} reps</span>
+                      {set.rpe && <span className="text-xs text-slate-500">RPE {set.rpe}</span>}
+                      {isWarmup && <span className="text-xs bg-yellow-500/20 px-1.5 rounded">Warmup</span>}
+                      {isFailure && <span className="text-xs bg-red-500/20 px-1.5 rounded">Failure</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {/* Workout Summary */}
+          <div className="flex gap-4 text-xs text-slate-500 pt-2 border-t border-slate-700/50">
+            <span>Total: {totalSets} sets</span>
+            <span>Volume: {(totalVolume / 1000).toFixed(1)}t</span>
+            {duration > 0 && <span>Duration: {formatDuration(duration)}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Routine Content Component with Enhanced Features
 const RoutineContent = ({
   routine,
   subCategory,
@@ -2525,12 +2641,15 @@ const RoutineContent = ({
   dateRange,
   bodyWeight,
 }) => {
-  // CRITICAL: Filter workouts based on routine AND sub-category
-  const filteredWorkouts = useMemo(() => {
-    if (!routine || !workouts) return [];
+  const [expandedWorkouts, setExpandedWorkouts] = useState({});
 
-    const isCardio = routine.name === 'Cardio' || routine.name === 'cardio';
-    if (isCardio) return []; // Cardio uses conditioning, not workouts
+  // Determine if this is a cardio routine
+  const isCardio = routine?.name?.toLowerCase() === 'cardio';
+
+  // Filter WORKOUTS for strength routines
+  const filteredWorkouts = useMemo(() => {
+    if (!routine || isCardio) return [];
+    if (!workouts || !Array.isArray(workouts)) return [];
 
     return workouts.filter(workout => {
       const title = (workout.title || workout.name || '').toLowerCase();
@@ -2543,34 +2662,68 @@ const RoutineContent = ({
 
       // If "All" selected, match any keyword in this routine
       const allKeywords = Object.values(routine.keywords || {}).flat();
+      if (allKeywords.length === 0) return true; // No keywords = show all
       return allKeywords.some(kw => title.includes(kw.toLowerCase()));
     });
-  }, [routine, subCategory, workouts]);
+  }, [routine, subCategory, workouts, isCardio]);
 
-  // Filter conditioning for cardio
+  // Filter CONDITIONING for cardio
   const filteredConditioning = useMemo(() => {
-    if (!routine || !conditioning) return [];
-
-    const isCardio = routine.name === 'Cardio' || routine.name === 'cardio';
-    if (!isCardio) return [];
+    if (!routine || !isCardio) return [];
+    if (!conditioning || !Array.isArray(conditioning)) return [];
 
     return conditioning.filter(session => {
-      const type = (session.type || session.category || '').toLowerCase();
+      const type = (session.type || session.category || session.name || '').toLowerCase();
 
+      // If sub-category is selected (not "All"), filter by sub-category keywords
       if (subCategory && subCategory !== 'All') {
         const keywords = routine.keywords?.[subCategory] || [];
         return keywords.some(kw => type.includes(kw.toLowerCase()));
       }
 
-      const allKeywords = Object.values(routine.keywords || {}).flat();
-      return allKeywords.some(kw => type.includes(kw.toLowerCase()));
+      // If "All" selected for cardio, show ALL conditioning
+      return true; // Show all conditioning for cardio
     });
-  }, [routine, subCategory, conditioning]);
+  }, [routine, subCategory, conditioning, isCardio]);
 
   // Calculate stats from FILTERED data only
   const stats = useMemo(() => {
-    const data = filteredWorkouts;
+    if (isCardio) {
+      // Cardio stats from conditioning
+      let totalDuration = 0;
+      let totalCalories = 0;
+      let totalDistance = 0;
+      let totalHR = 0;
+      let hrCount = 0;
 
+      filteredConditioning.forEach(session => {
+        totalDuration += session.duration || 0;
+        totalCalories += session.activeCalories || session.calories || 0;
+        totalDistance += session.distance || 0;
+        if (session.avgHeartRate) {
+          totalHR += session.avgHeartRate;
+          hrCount++;
+        }
+      });
+
+      return {
+        workouts: filteredConditioning.length,
+        duration: totalDuration,
+        calories: totalCalories,
+        distance: totalDistance,
+        avgHR: hrCount > 0 ? Math.round(totalHR / hrCount) : 0,
+        workingSets: 0,
+        warmupSets: 0,
+        failureSets: 0,
+        totalReps: 0,
+        totalVolume: 0,
+        totalCalories: 0,
+        muscleDistribution: [],
+      };
+    }
+
+    // Strength stats
+    const data = filteredWorkouts;
     let totalSets = 0;
     let workingSets = 0;
     let warmupSets = 0;
@@ -2580,12 +2733,9 @@ const RoutineContent = ({
     let totalCalories = 0;
     let totalHR = 0;
     let hrCount = 0;
-
-    // Muscle distribution
     const muscleVolume = {};
 
     data.forEach(workout => {
-      // Calories and HR from Apple Health
       if (workout.appleHealth) {
         totalCalories += workout.appleHealth.activeCalories || 0;
         if (workout.appleHealth.avgHeartRate) {
@@ -2594,11 +2744,8 @@ const RoutineContent = ({
         }
       }
 
-      // Process exercises
       (workout.exercises || []).forEach(exercise => {
         const exerciseName = (exercise.name || exercise.title || '').toLowerCase();
-
-        // Determine muscle group
         let muscleGroup = 'Other';
         if (exerciseName.includes('chest') || exerciseName.includes('bench') || exerciseName.includes('fly') || exerciseName.includes('press') && !exerciseName.includes('shoulder')) {
           muscleGroup = 'Chest';
@@ -2613,7 +2760,7 @@ const RoutineContent = ({
         } else if (exerciseName.includes('leg') || exerciseName.includes('squat') || exerciseName.includes('lunge') || exerciseName.includes('quad') || exerciseName.includes('hamstring') || exerciseName.includes('calf') || exerciseName.includes('glute')) {
           muscleGroup = 'Legs';
         } else if (exerciseName.includes('deadlift')) {
-          muscleGroup = 'Back'; // or could be Legs
+          muscleGroup = 'Back';
         }
 
         (exercise.sets || []).forEach(set => {
@@ -2621,11 +2768,9 @@ const RoutineContent = ({
           const reps = set.reps || 0;
           const weight = set.weight_kg || set.weight || 0;
           const volume = reps * weight;
-
           totalReps += reps;
           totalVolume += volume;
 
-          // Set type
           if (set.set_type === 'warmup' || set.type === 'warmup') {
             warmupSets++;
           } else if (set.set_type === 'failure' || set.type === 'failure' || set.rpe >= 10) {
@@ -2635,13 +2780,11 @@ const RoutineContent = ({
             workingSets++;
           }
 
-          // Add to muscle volume
           muscleVolume[muscleGroup] = (muscleVolume[muscleGroup] || 0) + volume;
         });
       });
     });
 
-    // Calculate muscle distribution percentages
     const totalMuscleVolume = Object.values(muscleVolume).reduce((a, b) => a + b, 0) || 1;
     const muscleDistribution = Object.entries(muscleVolume)
       .map(([muscle, volume]) => ({
@@ -2663,7 +2806,158 @@ const RoutineContent = ({
       avgHR: hrCount > 0 ? Math.round(totalHR / hrCount) : 0,
       muscleDistribution,
     };
-  }, [filteredWorkouts]);
+  }, [isCardio, filteredWorkouts, filteredConditioning]);
+
+  // Calculate Key Lifts / 1RM for this routine
+  const keyLifts = useMemo(() => {
+    if (isCardio) return [];
+    const exerciseMaxes = {};
+
+    filteredWorkouts.forEach(workout => {
+      (workout.exercises || []).forEach(exercise => {
+        const name = exercise.name || exercise.title;
+        if (!name) return;
+
+        (exercise.sets || []).forEach(set => {
+          const weight = set.weight_kg || set.weight || 0;
+          const reps = set.reps || 0;
+          if (weight <= 0 || reps <= 0) return;
+
+          // Estimate 1RM using Epley formula
+          const estimated1RM = weight * (1 + reps / 30);
+
+          if (!exerciseMaxes[name] || estimated1RM > exerciseMaxes[name].estimated1RM) {
+            exerciseMaxes[name] = {
+              name,
+              weight,
+              reps,
+              estimated1RM,
+              date: workout.start_time || workout.date,
+            };
+          }
+        });
+      });
+    });
+
+    return Object.values(exerciseMaxes)
+      .sort((a, b) => b.estimated1RM - a.estimated1RM)
+      .slice(0, 5);
+  }, [isCardio, filteredWorkouts]);
+
+  // Calculate Recent PRs
+  const recentPRs = useMemo(() => {
+    if (isCardio) return [];
+    const prs = [];
+    const exerciseBests = {};
+
+    const sortedWorkouts = [...filteredWorkouts].sort((a, b) =>
+      new Date(a.start_time || a.date) - new Date(b.start_time || b.date)
+    );
+
+    sortedWorkouts.forEach(workout => {
+      (workout.exercises || []).forEach(exercise => {
+        const name = exercise.name || exercise.title;
+        if (!name) return;
+
+        (exercise.sets || []).forEach(set => {
+          const weight = set.weight_kg || set.weight || 0;
+          const reps = set.reps || 0;
+          if (weight <= 0) return;
+
+          const key = `${name}-${reps}`;
+          const prevBest = exerciseBests[key];
+
+          if (!prevBest || weight > prevBest.weight) {
+            if (prevBest) {
+              prs.push({
+                exercise: name,
+                weight,
+                reps,
+                date: workout.start_time || workout.date,
+                improvement: weight - prevBest.weight,
+              });
+            }
+            exerciseBests[key] = { weight, reps };
+          }
+        });
+      });
+    });
+
+    return prs.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  }, [isCardio, filteredWorkouts]);
+
+  // Calculate Strength Forecast (10% improvement targets)
+  const strengthForecast = useMemo(() => {
+    if (isCardio) return [];
+    return keyLifts.slice(0, 3).map(lift => ({
+      ...lift,
+      target1RM: Math.ceil(lift.estimated1RM * 1.1),
+      targetWeight: Math.ceil(lift.weight * 1.1),
+    }));
+  }, [isCardio, keyLifts]);
+
+  // Calculate Achievements for this routine
+  const achievements = useMemo(() => {
+    if (isCardio || !bodyWeight || bodyWeight <= 0) return { earned: [], inProgress: [] };
+
+    const earned = [];
+    const inProgress = [];
+
+    keyLifts.forEach(lift => {
+      const ratio = lift.estimated1RM / bodyWeight;
+      const liftName = lift.name.toLowerCase();
+
+      let thresholds = [];
+      if (liftName.includes('bench') || liftName.includes('incline')) {
+        thresholds = [
+          { mult: 1.0, name: `1x BW ${lift.name.split(' ').slice(0, 2).join(' ')}` },
+          { mult: 1.5, name: `1.5x BW ${lift.name.split(' ').slice(0, 2).join(' ')}` },
+        ];
+      } else if (liftName.includes('squat')) {
+        thresholds = [
+          { mult: 1.5, name: '1.5x BW Squat' },
+          { mult: 2.0, name: '2x BW Squat' },
+        ];
+      } else if (liftName.includes('deadlift')) {
+        thresholds = [
+          { mult: 2.0, name: '2x BW Deadlift' },
+          { mult: 2.5, name: '2.5x BW Deadlift' },
+        ];
+      } else if (liftName.includes('press') || liftName.includes('ohp')) {
+        thresholds = [
+          { mult: 0.7, name: '0.7x BW OHP' },
+          { mult: 1.0, name: '1x BW OHP' },
+        ];
+      } else if (liftName.includes('row') || liftName.includes('pulldown')) {
+        thresholds = [
+          { mult: 1.0, name: `1x BW ${lift.name.split(' ').slice(0, 2).join(' ')}` },
+        ];
+      }
+
+      thresholds.forEach(threshold => {
+        const progress = Math.min(100, Math.round((ratio / threshold.mult) * 100));
+        if (progress >= 100) {
+          earned.push({ name: threshold.name, icon: '🏆' });
+        } else {
+          inProgress.push({
+            name: threshold.name,
+            progress,
+            current: lift.estimated1RM.toFixed(1),
+            target: (bodyWeight * threshold.mult).toFixed(1),
+          });
+        }
+      });
+    });
+
+    return { earned, inProgress: inProgress.slice(0, 3) };
+  }, [isCardio, keyLifts, bodyWeight]);
+
+  const toggleWorkout = useCallback((workoutId) => {
+    setExpandedWorkouts(prev => ({
+      ...prev,
+      [workoutId]: !prev[workoutId]
+    }));
+  }, []);
 
   // Debug logging
   useEffect(() => {
@@ -2687,8 +2981,153 @@ const RoutineContent = ({
 
   return (
     <div className="space-y-4">
-      {/* Overview Card - uses FILTERED stats */}
-      <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+      {/* Key Lifts (1RM) - Only for strength routines */}
+      {!isCardio && keyLifts.length > 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="text-sm font-medium text-slate-300 mb-3">Key Lifts (Est. 1RM)</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {keyLifts.map((lift, idx) => (
+              <div key={idx} className="bg-slate-900/50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-white">
+                  {lift.estimated1RM.toFixed(1)}
+                  <span className="text-xs text-slate-400 ml-1">kg</span>
+                </div>
+                <div className="text-xs text-slate-400 truncate mt-1" title={lift.name}>
+                  {lift.name.split(' ').slice(0, 2).join(' ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Achievements - Only for strength routines */}
+      {!isCardio && (achievements.earned.length > 0 || achievements.inProgress.length > 0) && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="flex justify-between items-center mb-3">
+            <div className="text-sm font-medium text-slate-300 flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-amber-400" />
+              Achievements
+            </div>
+            {achievements.earned.length > 0 && (
+              <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded-full">
+                {achievements.earned.length} Earned
+              </span>
+            )}
+          </div>
+
+          {achievements.earned.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {achievements.earned.map((ach, idx) => (
+                <div key={idx} className="flex items-center gap-1.5 bg-amber-500/20 text-amber-300 px-3 py-1.5 rounded-lg text-sm">
+                  <span>{ach.icon}</span>
+                  <span>{ach.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {achievements.inProgress.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs text-slate-500">In Progress</div>
+              {achievements.inProgress.map((ach, idx) => (
+                <div key={idx}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-slate-300">{ach.name}</span>
+                    <span className="text-slate-500 text-xs">{ach.current}/{ach.target} kg</span>
+                  </div>
+                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-amber-500 rounded-full transition-all"
+                      style={{ width: `${ach.progress}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recent PRs */}
+      {!isCardio && recentPRs.length > 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-green-400" />
+            Recent PRs
+          </div>
+          <div className="space-y-2">
+            {recentPRs.map((pr, idx) => (
+              <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-700/50 last:border-0">
+                <div>
+                  <div className="font-medium text-sm">{pr.exercise}</div>
+                  <div className="text-xs text-slate-500">
+                    {new Date(pr.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-green-400">{pr.weight} kg × {pr.reps}</div>
+                  <div className="text-xs text-green-500">+{pr.improvement} kg</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Strength Forecast */}
+      {!isCardio && strengthForecast.length > 0 && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="text-sm font-medium text-slate-300 mb-3 flex items-center gap-2">
+            <Target className="w-4 h-4 text-blue-400" />
+            Strength Forecast (+10%)
+          </div>
+          <div className="space-y-3">
+            {strengthForecast.map((lift, idx) => (
+              <div key={idx} className="flex justify-between items-center">
+                <div className="text-sm text-slate-400">{lift.name.split(' ').slice(0, 2).join(' ')}</div>
+                <div className="flex items-center gap-3">
+                  <span className="text-slate-500">{lift.estimated1RM.toFixed(1)} kg</span>
+                  <span className="text-slate-600">→</span>
+                  <span className="text-blue-400 font-medium">{lift.target1RM} kg</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Cardio Overview - Only for cardio routines */}
+      {isCardio && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="text-sm font-medium text-slate-300 mb-3">Cardio Overview</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-white">{stats.workouts}</div>
+              <div className="text-xs text-slate-400">Sessions</div>
+            </div>
+            <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-green-400">
+                {(stats.distance / 1000).toFixed(1)}
+                <span className="text-sm">km</span>
+              </div>
+              <div className="text-xs text-slate-400">Distance</div>
+            </div>
+            <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-orange-400">{stats.calories}</div>
+              <div className="text-xs text-slate-400">Calories</div>
+            </div>
+            <div className="bg-slate-900/50 rounded-lg p-3 text-center">
+              <div className="text-2xl font-bold text-red-400">{stats.avgHR}</div>
+              <div className="text-xs text-slate-400">Avg HR</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Strength Overview - Only for non-cardio */}
+      {!isCardio && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
         <div className="text-sm font-medium text-slate-300 mb-3">Overview</div>
         <div className="space-y-2">
           <div className="flex justify-between">
@@ -2764,27 +3203,79 @@ const RoutineContent = ({
         </div>
       )}
 
-      {/* Workout Log - uses FILTERED workouts */}
-      <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-        <div className="text-sm font-medium text-slate-300 mb-3">
-          Workout Log ({filteredWorkouts.length})
-        </div>
-        {filteredWorkouts.slice(0, 10).map((workout, idx) => (
-          <div key={workout.id || idx} className="py-2 border-b border-slate-700/50 last:border-0">
-            <div className="font-medium">{workout.title || workout.name}</div>
-            <div className="text-xs text-slate-500">
-              {new Date(workout.start_time || workout.date).toLocaleDateString('en-GB', {
-                day: 'numeric', month: 'short', year: 'numeric'
-              })}
+      {/* Cardio Session Log - Only for cardio */}
+      {isCardio && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="flex justify-between items-center mb-3">
+            <div className="text-sm font-medium text-slate-300">Session Log</div>
+            <span className="text-xs text-slate-500">({filteredConditioning.length})</span>
+          </div>
+
+          {filteredConditioning.length > 0 ? (
+            <div className="space-y-2">
+              {filteredConditioning.slice(0, 10).map((session, idx) => (
+                <div key={session.id || idx} className="flex justify-between items-center py-2 border-b border-slate-700/50 last:border-0">
+                  <div>
+                    <div className="font-medium text-sm">{session.type || 'Workout'}</div>
+                    <div className="text-xs text-slate-500">
+                      {new Date(session.date).toLocaleDateString('en-GB', {
+                        weekday: 'short', day: 'numeric', month: 'short'
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    {session.duration > 0 && (
+                      <span className="text-slate-400">{Math.round(session.duration / 60)}m</span>
+                    )}
+                    {session.distance > 0 && (
+                      <span className="text-green-400">{(session.distance / 1000).toFixed(1)} km</span>
+                    )}
+                    {(session.activeCalories || session.calories) > 0 && (
+                      <span className="text-orange-400">{session.activeCalories || session.calories} kcal</span>
+                    )}
+                    {session.avgHeartRate > 0 && (
+                      <span className="text-red-400">❤️ {session.avgHeartRate}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
+          ) : (
+            <div className="text-center text-slate-500 py-8">
+              No cardio sessions found for this filter.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Strength Workout Log - Only for non-cardio with expandable details */}
+      {!isCardio && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="flex justify-between items-center mb-3">
+            <div className="text-sm font-medium text-slate-300">
+              Workout Log
+            </div>
+            <span className="text-xs text-slate-500">({filteredWorkouts.length})</span>
           </div>
-        ))}
-        {filteredWorkouts.length === 0 && (
-          <div className="text-center text-slate-500 py-4">
-            No workouts found for this filter.
-          </div>
-        )}
-      </div>
+
+          {filteredWorkouts.length > 0 ? (
+            <div className="divide-y divide-slate-700/50">
+              {filteredWorkouts.slice(0, 10).map((workout, idx) => (
+                <WorkoutLogItem
+                  key={workout.id || idx}
+                  workout={workout}
+                  isExpanded={expandedWorkouts[workout.id || idx]}
+                  onToggle={() => toggleWorkout(workout.id || idx)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-slate-500 py-8">
+              No workouts found for this filter.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -3746,7 +4237,18 @@ const App = () => {
       color: 'cyan',
       subCategories: [],
       keywords: {
-        'all': ['calisthenics', 'bodyweight', 'push up', 'pull up', 'dip', 'muscle up', 'handstand'],
+        'all': [
+          'calisthenics',
+          'bodyweight',
+          'push up', 'push-up', 'pushup',
+          'pull up', 'pull-up', 'pullup',
+          'dip', 'dips',
+          'muscle up', 'muscle-up',
+          'handstand',
+          'plank',
+          'burpee',
+          'cali',
+        ],
       },
       enabled: true,
       order: 3,
